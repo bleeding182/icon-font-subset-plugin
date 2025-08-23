@@ -1,0 +1,249 @@
+# Docker image for cross-compiling native libraries for all platforms
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install base build tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    ninja-build \
+    pkg-config \
+    python3 \
+    autoconf \
+    automake \
+    libtool \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cross-compilation toolchains
+RUN apt-get update && apt-get install -y \
+    # MinGW for Windows cross-compilation
+    mingw-w64 \
+    # Clang and LLVM tools for cross-compilation
+    clang-14 \
+    lld-14 \
+    llvm-14 \
+    # Additional tools
+    zip \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up LLVM tools with proper versions
+RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100 && \
+    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100 && \
+    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100 && \
+    update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
+
+# Install Java for JNI headers (need full JDK for AWT libraries)
+RUN apt-get update && apt-get install -y \
+    openjdk-17-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set JAVA_HOME and ensure it's correct
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Verify Java installation
+RUN java -version && javac -version && \
+    ls -la $JAVA_HOME/include/ && \
+    ls -la $JAVA_HOME/include/linux/ || true
+
+# Install dependencies for cross-compilation to macOS
+# We'll use zig as a drop-in C/C++ cross-compiler which includes macOS support
+# Using Zig 0.13.0 for improved macOS cross-compilation support
+RUN cd /tmp && \
+    wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && \
+    tar xf zig-linux-x86_64-0.13.0.tar.xz && \
+    mv zig-linux-x86_64-0.13.0 /opt/zig && \
+    ln -s /opt/zig/zig /usr/local/bin/zig && \
+    rm zig-linux-x86_64-0.13.0.tar.xz
+
+# Create toolchain files first (before building HarfBuzz)
+RUN mkdir -p /toolchains
+
+# Windows toolchain
+RUN echo 'set(CMAKE_SYSTEM_NAME Windows)\n\
+set(CMAKE_SYSTEM_PROCESSOR x86_64)\n\
+set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)\n\
+set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)\n\
+set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)\n\
+set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n\
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n\
+set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")\n\
+set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")' > /toolchains/windows-x86_64.cmake
+
+# macOS x86_64 toolchain using Zig
+# Create wrapper scripts for Zig cc/c++ with target and optimization flags
+RUN echo '#!/bin/bash\nexec zig cc -target x86_64-macos-none -Oz "$@"' > /usr/local/bin/zig-cc-x86_64-macos && \
+    chmod +x /usr/local/bin/zig-cc-x86_64-macos && \
+    echo '#!/bin/bash\nexec zig c++ -target x86_64-macos-none -Oz "$@"' > /usr/local/bin/zig-c++-x86_64-macos && \
+    chmod +x /usr/local/bin/zig-c++-x86_64-macos
+
+# Create wrapper for ar command
+RUN echo '#!/bin/bash\nzig ar "$@"' > /usr/local/bin/zig-ar && \
+    chmod +x /usr/local/bin/zig-ar && \
+    echo '#!/bin/bash\nzig ranlib "$@"' > /usr/local/bin/zig-ranlib && \
+    chmod +x /usr/local/bin/zig-ranlib
+
+RUN echo 'set(CMAKE_SYSTEM_NAME Darwin)\n\
+set(CMAKE_SYSTEM_PROCESSOR x86_64)\n\
+set(CMAKE_C_COMPILER /usr/local/bin/zig-cc-x86_64-macos)\n\
+set(CMAKE_CXX_COMPILER /usr/local/bin/zig-c++-x86_64-macos)\n\
+set(CMAKE_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_C_COMPILER_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_CXX_COMPILER_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_C_COMPILER_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_CXX_COMPILER_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_OSX_ARCHITECTURES x86_64)\n\
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.12)\n\
+set(CMAKE_SHARED_LIBRARY_PREFIX "lib")\n\
+set(CMAKE_SHARED_LIBRARY_SUFFIX ".dylib")\n\
+set(CMAKE_C_COMPILER_WORKS 1)\n\
+set(CMAKE_CXX_COMPILER_WORKS 1)\n\
+set(CMAKE_C_ABI_COMPILED 1)\n\
+set(CMAKE_CXX_ABI_COMPILED 1)' > /toolchains/darwin-x86_64.cmake
+
+# macOS ARM64 toolchain using Zig
+# Create wrapper scripts for Zig cc/c++ with target and optimization flags
+RUN echo '#!/bin/bash\nexec zig cc -target aarch64-macos-none -Oz "$@"' > /usr/local/bin/zig-cc-aarch64-macos && \
+    chmod +x /usr/local/bin/zig-cc-aarch64-macos && \
+    echo '#!/bin/bash\nexec zig c++ -target aarch64-macos-none -Oz "$@"' > /usr/local/bin/zig-c++-aarch64-macos && \
+    chmod +x /usr/local/bin/zig-c++-aarch64-macos
+
+RUN echo 'set(CMAKE_SYSTEM_NAME Darwin)\n\
+set(CMAKE_SYSTEM_PROCESSOR aarch64)\n\
+set(CMAKE_C_COMPILER /usr/local/bin/zig-cc-aarch64-macos)\n\
+set(CMAKE_CXX_COMPILER /usr/local/bin/zig-c++-aarch64-macos)\n\
+set(CMAKE_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_C_COMPILER_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_CXX_COMPILER_AR /usr/local/bin/zig-ar)\n\
+set(CMAKE_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_C_COMPILER_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_CXX_COMPILER_RANLIB /usr/local/bin/zig-ranlib)\n\
+set(CMAKE_OSX_ARCHITECTURES arm64)\n\
+set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0)\n\
+set(CMAKE_SHARED_LIBRARY_PREFIX "lib")\n\
+set(CMAKE_SHARED_LIBRARY_SUFFIX ".dylib")\n\
+set(CMAKE_C_COMPILER_WORKS 1)\n\
+set(CMAKE_CXX_COMPILER_WORKS 1)\n\
+set(CMAKE_C_ABI_COMPILED 1)\n\
+set(CMAKE_CXX_ABI_COMPILED 1)' > /toolchains/darwin-aarch64.cmake
+
+# Build and install HarfBuzz from source for all targets
+WORKDIR /tmp
+
+# Build HarfBuzz for Linux native with minimal features
+RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-linux && \
+    cd harfbuzz-linux && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_UNISCRIBE=OFF \
+        -DHB_HAVE_DIRECTWRITE=OFF \
+        -DHB_HAVE_CORETEXT=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    # Strip the static libraries
+    strip --strip-unneeded /usr/local/lib/libharfbuzz*.a && \
+    cd /tmp && rm -rf harfbuzz-linux
+
+# Build HarfBuzz for Windows (MinGW) with minimal features
+RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-windows && \
+    cd harfbuzz-windows && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/windows-x86_64.cmake \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_UNISCRIBE=OFF \
+        -DHB_HAVE_DIRECTWRITE=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr/x86_64-w64-mingw32 \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    x86_64-w64-mingw32-strip --strip-unneeded /usr/x86_64-w64-mingw32/lib/libharfbuzz*.a && \
+    cd /tmp && rm -rf harfbuzz-windows
+
+# Build HarfBuzz for macOS x86_64 (using Zig) with minimal features
+RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-darwin-x86_64 && \
+    cd harfbuzz-darwin-x86_64 && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/darwin-x86_64.cmake \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_CORETEXT=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/darwin-x86_64 \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    cd /tmp && rm -rf harfbuzz-darwin-x86_64
+
+# Build HarfBuzz for macOS ARM64 (using Zig) with minimal features
+RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-darwin-aarch64 && \
+    cd harfbuzz-darwin-aarch64 && \
+    mkdir build && cd build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/darwin-aarch64.cmake \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_CORETEXT=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/darwin-aarch64 \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    cd /tmp && rm -rf harfbuzz-darwin-aarch64
+
+WORKDIR /workspace
+
+# Set default command
+CMD ["/bin/bash"]

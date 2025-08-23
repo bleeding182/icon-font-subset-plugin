@@ -1,0 +1,83 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+/.idea/compiler.xml
+/.idea/gradle.xml
+/.idea/kotlinc.xml
+/.idea/misc.xml
+/.idea/vcs.xml
+/.idea/deploymentTargetSelector.xml
+/.idea/runConfigurations.xml
+/.idea/migrations.xml
+/.idea/AndroidProjectSystem.xml
+/.idea/jarRepositories.xml
+/.idea/uiDesigner.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Build directories
+**/build/
+**/.gradle/
+**/out/
+**/target/
+
+# Native build artifacts
+font-subsetting/font-subsetting-plugin/cmake-build*/
+font-subsetting/font-subsetting-plugin/build/native-cross/
+.docker-image-id
+
+# Kotlin/Java
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+.kotlin/
+**/.kotlin/
+
+# Local configuration
+local.properties
+gradle-local.properties
+*.local
+
+# Claude AI
+.claude/settings.local.json
+.claude/*.local.json
+# Keep CLAUDE.md as it's project documentation
+
+# Documentation (keep these)
+# README.md
+# CLAUDE.md
+# PUBLISHING.md
+
+# GitHub workflows (keep these)
+# .github/
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# IDE files
+.vscode/
+*.ipr
+*.iws
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*.log
