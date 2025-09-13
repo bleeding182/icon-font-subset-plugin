@@ -145,9 +145,10 @@ abstract class FontSubsettingTask : DefaultTask() {
     }
     
     private fun copyAllFonts(outputDir: File) {
-        outputDir.mkdirs()
+        val fontDir = File(outputDir, "font")
+        fontDir.mkdirs()
         fontConfigurations.forEach { fontConfig ->
-            copyFont(fontConfig, outputDir)
+            copyFont(fontConfig, fontDir)
         }
     }
     
@@ -168,9 +169,10 @@ abstract class FontSubsettingTask : DefaultTask() {
     }
     
     private fun subsetAllFonts(usedIconNames: Set<String>, outputDir: File) {
-        outputDir.mkdirs()
+        val fontDir = File(outputDir, "font")
+        fontDir.mkdirs()
         fontConfigurations.forEach { fontConfig ->
-            processFont(fontConfig, usedIconNames, outputDir)
+            processFont(fontConfig, usedIconNames, fontDir)
         }
     }
     
