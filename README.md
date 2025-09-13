@@ -111,4 +111,4 @@ fontSubsetting {
 
 ## License
 
-Apache 2.0
+MIT License
