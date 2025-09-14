@@ -46,8 +46,7 @@ fontSubsetting {
         create("materialSymbols") {
             fontFile.set(file("symbolfonts/MaterialSymbolsOutlined.ttf"))
             codepointsFile.set(file("symbolfonts/MaterialSymbolsOutlined.codepoints"))
-            packageName.set("com.davidmedenjak.fontsubsetting")
-            className.set("MaterialSymbols")
+            className.set("com.davidmedenjak.fontsubsetting.MaterialSymbols")
             // resourceName and fontFileName will default based on font file name
             // but we can override them if needed:
             resourceName.set("symbolsb")
@@ -68,7 +67,7 @@ fontSubsetting {
                 axis("opsz").range(24f, 48f, 48f)
             }
             stripGlyphNames = true
-            stripHinting = false
+            stripHinting = true
         }
     }
 }

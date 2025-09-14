@@ -33,14 +33,8 @@ abstract class FontConfiguration @Inject constructor(
     abstract val codepointsFile: RegularFileProperty
 
     /**
-     * Package name for the generated Kotlin file
-     * (e.g., "com.davidmedenjak.fontsubsetting")
-     */
-    abstract val packageName: Property<String>
-
-    /**
-     * Class name for the generated Kotlin object
-     * (e.g., "MaterialSymbols")
+     * Fully qualified class name for the generated Kotlin object
+     * (e.g., "com.davidmedenjak.fontsubsetting.MaterialSymbols")
      */
     abstract val className: Property<String>
 
@@ -121,6 +115,7 @@ abstract class FontConfiguration @Inject constructor(
         }
     }
     
+
     /**
      * Validates that all required properties are set.
      * @throws IllegalStateException if validation fails
@@ -132,14 +127,12 @@ abstract class FontConfiguration @Inject constructor(
         if (!fontFile.get().asFile.exists()) {
             throw IllegalStateException("Font file does not exist: ${fontFile.get().asFile.absolutePath}")
         }
+
         if (!codepointsFile.isPresent) {
             throw IllegalStateException("Codepoints file not configured for font '$name'")
         }
         if (!codepointsFile.get().asFile.exists()) {
             throw IllegalStateException("Codepoints file does not exist: ${codepointsFile.get().asFile.absolutePath}")
-        }
-        if (!packageName.isPresent) {
-            throw IllegalStateException("Package name not configured for font '$name'")
         }
         if (!className.isPresent) {
             throw IllegalStateException("Class name not configured for font '$name'")

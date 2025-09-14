@@ -22,7 +22,7 @@ object Constants {
     
     object FileNames {
         const val USAGE_DATA_PREFIX = "usedIcons_"
-        const val USAGE_DATA_EXTENSION = ".json"
+        const val USAGE_DATA_EXTENSION = ".txt"
     }
     
     object Defaults {

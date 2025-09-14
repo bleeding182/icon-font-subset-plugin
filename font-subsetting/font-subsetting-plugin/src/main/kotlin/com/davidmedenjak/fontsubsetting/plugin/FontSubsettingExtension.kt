@@ -2,8 +2,8 @@ package com.davidmedenjak.fontsubsetting.plugin
 
 import org.gradle.api.Action
 import org.gradle.api.NamedDomainObjectContainer
+import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.model.ObjectFactory
-import org.gradle.api.provider.Property
 import javax.inject.Inject
 
 /**
@@ -12,7 +12,7 @@ import javax.inject.Inject
 abstract class FontSubsettingExtension @Inject constructor(
     private val objectFactory: ObjectFactory
 ) {
-    
+
     /**
      * Container for font configurations.
      * Allows defining multiple fonts with their codepoints files for code generation.
@@ -20,14 +20,20 @@ abstract class FontSubsettingExtension @Inject constructor(
     val fonts: NamedDomainObjectContainer<FontConfiguration> = objectFactory.domainObjectContainer(
         FontConfiguration::class.java
     )
-    
+
+    /**
+     * Output directory for all subsetted fonts.
+     * This directory will contain res/font/ structure with all processed fonts.
+     */
+    abstract val outputDirectory: DirectoryProperty
+
     /**
      * Configure fonts using a DSL.
      */
     fun fonts(action: Action<NamedDomainObjectContainer<FontConfiguration>>) {
         action.execute(fonts)
     }
-    
+
     fun setDefaults() {
         // No defaults needed currently
     }

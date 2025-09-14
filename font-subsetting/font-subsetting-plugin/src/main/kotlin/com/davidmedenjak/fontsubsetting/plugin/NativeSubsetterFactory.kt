@@ -5,16 +5,10 @@ import com.davidmedenjak.fontsubsetting.native.NativeLogger
 import org.gradle.api.GradleException
 import org.gradle.api.logging.Logger
 
-/**
- * Factory for creating and managing HarfBuzzSubsetter instances.
- */
 class NativeSubsetterFactory(private val logger: Logger) {
-    
+
     private var subsetter: HarfBuzzSubsetter? = null
-    
-    /**
-     * Gets or creates a HarfBuzzSubsetter instance with proper logging.
-     */
+
     fun getSubsetter(): HarfBuzzSubsetter {
         if (subsetter == null) {
             subsetter = createSubsetter()
