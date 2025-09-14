@@ -18,7 +18,9 @@ struct AxisConfig {
 hb_face_t* perform_subsetting(
     const FontData& font_data,
     const std::vector<unsigned int>& codepoints,
-    const std::vector<AxisConfig>& axis_configs
+    const std::vector<AxisConfig>& axis_configs,
+    bool strip_hinting = true,
+    bool strip_glyph_names = true
 );
 
 #endif // FONTSUBSETTING_FONT_SUBSETTER_H

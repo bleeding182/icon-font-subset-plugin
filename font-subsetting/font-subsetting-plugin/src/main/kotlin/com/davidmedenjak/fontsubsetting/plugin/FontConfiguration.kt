@@ -8,7 +8,6 @@ import org.gradle.api.model.ObjectFactory
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.Provider
 import javax.inject.Inject
-import java.io.File
 
 /**
  * Configuration for a single font that can be subset.
@@ -60,10 +59,24 @@ abstract class FontConfiguration @Inject constructor(
     abstract val fontFileName: Property<String>
 
     /**
+     * Whether to strip hinting instructions from the font
+     * Hinting can be 15-20% of font size and is unnecessary for icon fonts on high-DPI screens
+     * Default: true
+     */
+    abstract val stripHinting: Property<Boolean>
+
+    /**
+     * Whether to strip glyph names from the font
+     * Glyph names can be 5-10% of font size and are unnecessary for icon fonts
+     * Default: true
+     */
+    abstract val stripGlyphNames: Property<Boolean>
+
+    /**
      * Container for axis configurations for variable fonts.
      * Allows configuring which axes to keep, remove, or constrain.
      */
-    val axes: NamedDomainObjectContainer<AxisConfiguration> = 
+    val axes: NamedDomainObjectContainer<AxisConfiguration> =
         objectFactory.domainObjectContainer(AxisConfiguration::class.java)
     
     /**

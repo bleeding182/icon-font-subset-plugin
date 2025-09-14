@@ -93,8 +93,8 @@ Java_com_davidmedenjak_fontsubsetting_native_HarfBuzzSubsetter_nativeSubsetFont(
         return JNI_FALSE;
     }
     
-    // Perform subsetting
-    hb_face_t* subset_face = perform_subsetting(font_data, codepoints, {});
+    // Perform subsetting with default flags (strip hinting and glyph names)
+    hb_face_t* subset_face = perform_subsetting(font_data, codepoints, {}, true, true);
     if (!subset_face) {
         return JNI_FALSE;
     }
@@ -194,8 +194,8 @@ Java_com_davidmedenjak_fontsubsetting_native_HarfBuzzSubsetter_nativeSubsetFontW
         return JNI_FALSE;
     }
     
-    // Perform subsetting with axes
-    hb_face_t* subset_face = perform_subsetting(font_data, codepoints, axis_configs);
+    // Perform subsetting with axes and default flags (strip hinting and glyph names)
+    hb_face_t* subset_face = perform_subsetting(font_data, codepoints, axis_configs, true, true);
     if (!subset_face) {
         return JNI_FALSE;
     }
@@ -216,6 +216,113 @@ Java_com_davidmedenjak_fontsubsetting_native_HarfBuzzSubsetter_nativeSubsetFontW
                 " -> " + format_file_size(subset_length));
     }
     
+    return success ? JNI_TRUE : JNI_FALSE;
+}
+
+JNI_EXPORT JNIEXPORT jboolean JNICALL
+Java_com_davidmedenjak_fontsubsetting_native_HarfBuzzSubsetter_nativeSubsetFontWithAxesAndFlags(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring inputPath,
+    jstring outputPath,
+    jobjectArray glyphs,
+    jobjectArray axisTags,
+    jfloatArray axisMinValues,
+    jfloatArray axisMaxValues,
+    jfloatArray axisDefaultValues,
+    jbooleanArray axisRemove,
+    jboolean stripHinting,
+    jboolean stripGlyphNames) {
+
+    std::string input_path = jstring_to_string(env, inputPath);
+    std::string output_path = jstring_to_string(env, outputPath);
+    std::vector<std::string> glyph_list = jarray_to_vector(env, glyphs);
+
+    log_info("Starting font subsetting with axes and flags: " + input_path + " -> " + output_path);
+
+    // Parse axis configurations
+    std::vector<AxisConfig> axis_configs;
+    if (axisTags != nullptr) {
+        std::vector<std::string> axis_tags = jarray_to_vector(env, axisTags);
+        jsize axis_count = axis_tags.size();
+
+        axis_configs.reserve(axis_count);
+
+        jfloat* mins = axisMinValues ? env->GetFloatArrayElements(axisMinValues, nullptr) : nullptr;
+        jfloat* maxs = axisMaxValues ? env->GetFloatArrayElements(axisMaxValues, nullptr) : nullptr;
+        jfloat* defaults = axisDefaultValues ? env->GetFloatArrayElements(axisDefaultValues, nullptr) : nullptr;
+        jboolean* removes = axisRemove ? env->GetBooleanArrayElements(axisRemove, nullptr) : nullptr;
+
+        for (jsize i = 0; i < axis_count; i++) {
+            AxisConfig config;
+            config.tag = axis_tags[i];
+            config.min_value = mins ? mins[i] : 0.0f;
+            config.max_value = maxs ? maxs[i] : 0.0f;
+            config.default_value = defaults ? defaults[i] : 0.0f;
+            config.remove = removes ? removes[i] : false;
+            axis_configs.push_back(config);
+        }
+
+        if (mins) env->ReleaseFloatArrayElements(axisMinValues, mins, JNI_ABORT);
+        if (maxs) env->ReleaseFloatArrayElements(axisMaxValues, maxs, JNI_ABORT);
+        if (defaults) env->ReleaseFloatArrayElements(axisDefaultValues, defaults, JNI_ABORT);
+        if (removes) env->ReleaseBooleanArrayElements(axisRemove, removes, JNI_ABORT);
+    }
+
+    // Read input font
+    FontData font_data = read_font_file(input_path);
+    if (!font_data.valid) {
+        return JNI_FALSE;
+    }
+
+    // Convert glyphs to codepoints
+    std::vector<unsigned int> codepoints;
+    codepoints.reserve(glyph_list.size());
+
+    for (const auto& glyph : glyph_list) {
+        // Parse codepoint without exceptions
+        char* end_ptr = nullptr;
+        unsigned long codepoint = std::strtoul(glyph.c_str(), &end_ptr, 10);
+
+        // Check if conversion was successful
+        if (end_ptr != glyph.c_str() && *end_ptr == '\0' && codepoint <= UINT_MAX) {
+            codepoints.push_back(static_cast<unsigned int>(codepoint));
+        } else {
+            log_warn("Failed to parse codepoint: " + glyph);
+        }
+    }
+
+    if (codepoints.empty()) {
+        log_error("No valid codepoints to subset");
+        return JNI_FALSE;
+    }
+
+    // Perform subsetting with axes and custom flags
+    hb_face_t* subset_face = perform_subsetting(
+        font_data, codepoints, axis_configs,
+        stripHinting == JNI_TRUE,
+        stripGlyphNames == JNI_TRUE
+    );
+    if (!subset_face) {
+        return JNI_FALSE;
+    }
+
+    // Get subset data
+    HBBlob subset_blob(hb_face_reference_blob(subset_face));
+    unsigned int subset_length;
+    const char* subset_data = hb_blob_get_data(subset_blob, &subset_length);
+
+    // Write output
+    bool success = write_font_file(output_path, subset_data, subset_length);
+
+    // Clean up
+    hb_face_destroy(subset_face);
+
+    if (success) {
+        log_info("Successfully subsetted font with axes and flags: " + format_file_size(font_data.size) +
+                " -> " + format_file_size(subset_length));
+    }
+
     return success ? JNI_TRUE : JNI_FALSE;
 }
 

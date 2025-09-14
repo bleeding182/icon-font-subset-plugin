@@ -45,10 +45,12 @@ data class SerializableFontConfig(
     val className: String,
     val resourceName: String?,
     val fontFileName: String?,
-    val axes: List<SerializableAxisConfig>
+    val axes: List<SerializableAxisConfig>,
+    val stripHinting: Boolean = true,
+    val stripGlyphNames: Boolean = true
 ) : java.io.Serializable {
     companion object {
-        private const val serialVersionUID = 1L
+        private const val serialVersionUID = 2L
     }
 }
 
@@ -178,31 +180,36 @@ abstract class FontSubsettingTask : DefaultTask() {
     
     private fun processFont(fontConfig: FontConfiguration, usedIconNames: Set<String>, outputDir: File) {
         logger.info("Processing font: ${fontConfig.name}")
-        
+
         val fontFile = fontConfig.fontFile.get().asFile
         val codepointsFile = fontConfig.codepointsFile.get().asFile
         val outputFileName = fontConfig.fontFileName.orElse(
             fontConfig.getDefaultFontFileName()
         ).get()
-        
+
         if (!validateFiles(fontFile, codepointsFile)) {
             return
         }
-        
+
         val codepoints = loadCodepoints(codepointsFile, usedIconNames)
         if (codepoints.isEmpty()) {
             logger.warn("No matching codepoints found for font ${fontConfig.name}")
             copyFont(fontConfig, outputDir)
             return
         }
-        
+
         val axisConfigs = convertAxisConfigurations(fontConfig.axes)
+        val stripHinting = fontConfig.stripHinting.orElse(true).get()
+        val stripGlyphNames = fontConfig.stripGlyphNames.orElse(true).get()
+
         subsetFont(
             fontName = outputFileName,
             icons = codepoints,
             fontFile = fontFile,
             outputDir = outputDir,
-            axisConfigs = axisConfigs
+            axisConfigs = axisConfigs,
+            stripHinting = stripHinting,
+            stripGlyphNames = stripGlyphNames
         )
     }
     
@@ -292,9 +299,11 @@ abstract class FontSubsettingTask : DefaultTask() {
         icons: Set<String>,
         fontFile: File,
         outputDir: File,
-        axisConfigs: List<HarfBuzzSubsetter.AxisConfig> = emptyList()
+        axisConfigs: List<HarfBuzzSubsetter.AxisConfig> = emptyList(),
+        stripHinting: Boolean = true,
+        stripGlyphNames: Boolean = true
     ) {
-        val cacheKey = generateCacheKey(fontName, icons, axisConfigs)
+        val cacheKey = generateCacheKey(fontName, icons, axisConfigs, stripHinting, stripGlyphNames)
         val cacheFile = File(buildDirectory.get().asFile, "${Constants.Directories.BUILD_CACHE}/${cacheKey}.ttf")
         
         if (cacheFile.exists()) {
@@ -308,7 +317,14 @@ abstract class FontSubsettingTask : DefaultTask() {
         
         try {
             val subsetter = NativeSubsetterFactory(logger).getSubsetter()
-            val result = subsetter.subset(fontFile, outputFile, icons.toList(), axisConfigs)
+            val result = subsetter.subset(
+                fontFile,
+                outputFile,
+                icons.toList(),
+                axisConfigs,
+                stripHinting,
+                stripGlyphNames
+            )
             
             result.onSuccess { subsetResult ->
                 cacheFontResult(subsetResult.outputFile, cacheFile)
@@ -360,7 +376,9 @@ abstract class FontSubsettingTask : DefaultTask() {
     private fun generateCacheKey(
         fontName: String,
         icons: Set<String>,
-        axisConfigs: List<HarfBuzzSubsetter.AxisConfig>
+        axisConfigs: List<HarfBuzzSubsetter.AxisConfig>,
+        stripHinting: Boolean = true,
+        stripGlyphNames: Boolean = true
     ): String {
         val digest = MessageDigest.getInstance("SHA-256")
         digest.update(fontName.toByteArray())
@@ -374,6 +392,9 @@ abstract class FontSubsettingTask : DefaultTask() {
             axis.maxValue?.let { digest.update(it.toString().toByteArray()) }
             axis.defaultValue?.let { digest.update(it.toString().toByteArray()) }
         }
+        // Include flag settings in cache key
+        digest.update(stripHinting.toString().toByteArray())
+        digest.update(stripGlyphNames.toString().toByteArray())
         return digest.digest().joinToString("") { "%02x".format(it) }.take(16)
     }
     

@@ -67,6 +67,8 @@ fontSubsetting {
                 // Keep optical size but limit to 24-48 range
                 axis("opsz").range(24f, 48f, 48f)
             }
+            stripGlyphNames = true
+            stripHinting = false
         }
     }
 }

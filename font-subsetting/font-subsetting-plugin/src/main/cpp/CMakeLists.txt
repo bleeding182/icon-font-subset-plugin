@@ -223,12 +223,13 @@ message(STATUS "HarfBuzz include dirs: ${HARFBUZZ_INCLUDE_DIRS}")
 message(STATUS "HarfBuzz libraries: ${HARFBUZZ_LIBRARIES}")
 
 # Create the JNI library
-add_library(fontsubsetting SHARED 
+add_library(fontsubsetting SHARED
     fontsubsetting_jni.cpp
     logging.cpp
     jni_utils.cpp
     font_io.cpp
     font_subsetter.cpp
+    font_metrics.cpp
 )
 
 # Set default symbol visibility to hidden (only export JNI functions)

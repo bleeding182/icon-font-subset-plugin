@@ -212,7 +212,7 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
     
     /**
      * Subsets a font file with axis configurations for variable fonts.
-     * 
+     *
      * @param inputFontPath Path to the input font file
      * @param outputFontPath Path where the subsetted font will be saved
      * @param glyphs List of Unicode codepoints to include
@@ -226,19 +226,62 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         axisConfigs: List<AxisConfig>
     ): Boolean {
         ensureLibraryLoaded()
-        
+
+        // Use the new method with flags, defaulting to stripping both hinting and glyph names
+        return subsetFontWithAxesAndFlags(
+            inputFontPath,
+            outputFontPath,
+            glyphs,
+            axisConfigs,
+            stripHinting = true,
+            stripGlyphNames = true
+        )
+    }
+    
+    /**
+     * Subsets a font file with axis configurations and subsetting flags.
+     *
+     * @param inputFontPath Path to the input font file
+     * @param outputFontPath Path where the subsetted font will be saved
+     * @param glyphs List of Unicode codepoints to include
+     * @param axisConfigs List of axis configurations
+     * @param stripHinting Whether to strip hinting instructions (default: true)
+     * @param stripGlyphNames Whether to strip glyph names (default: true)
+     * @return true if subsetting was successful, false otherwise
+     */
+    fun subsetFontWithAxesAndFlags(
+        inputFontPath: String,
+        outputFontPath: String,
+        glyphs: Array<String>,
+        axisConfigs: List<AxisConfig>,
+        stripHinting: Boolean = true,
+        stripGlyphNames: Boolean = true
+    ): Boolean {
+        ensureLibraryLoaded()
+
         if (axisConfigs.isEmpty()) {
-            // If no axis configs, use regular subset
-            return nativeSubsetFont(inputFontPath, outputFontPath, glyphs)
+            // If no axis configs, still use the new method with empty arrays
+            return nativeSubsetFontWithAxesAndFlags(
+                inputFontPath,
+                outputFontPath,
+                glyphs,
+                emptyArray(),
+                floatArrayOf(),
+                floatArrayOf(),
+                floatArrayOf(),
+                booleanArrayOf(),
+                stripHinting,
+                stripGlyphNames
+            )
         }
-        
+
         val axisTags = axisConfigs.map { it.tag }.toTypedArray()
         val axisMinValues = axisConfigs.map { it.minValue }.toFloatArray()
         val axisMaxValues = axisConfigs.map { it.maxValue }.toFloatArray()
         val axisDefaultValues = axisConfigs.map { it.defaultValue }.toFloatArray()
         val axisRemove = axisConfigs.map { it.remove }.toBooleanArray()
-        
-        return nativeSubsetFontWithAxes(
+
+        return nativeSubsetFontWithAxesAndFlags(
             inputFontPath,
             outputFontPath,
             glyphs,
@@ -246,10 +289,12 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
             axisMinValues,
             axisMaxValues,
             axisDefaultValues,
-            axisRemove
+            axisRemove,
+            stripHinting,
+            stripGlyphNames
         )
     }
-    
+
     private external fun nativeSubsetFontWithAxes(
         inputFontPath: String,
         outputFontPath: String,
@@ -259,6 +304,19 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         axisMaxValues: FloatArray,
         axisDefaultValues: FloatArray,
         axisRemove: BooleanArray
+    ): Boolean
+
+    private external fun nativeSubsetFontWithAxesAndFlags(
+        inputFontPath: String,
+        outputFontPath: String,
+        glyphs: Array<String>,
+        axisTags: Array<String>,
+        axisMinValues: FloatArray,
+        axisMaxValues: FloatArray,
+        axisDefaultValues: FloatArray,
+        axisRemove: BooleanArray,
+        stripHinting: Boolean,
+        stripGlyphNames: Boolean
     ): Boolean
     
     /**
@@ -394,7 +452,9 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         inputFile: File,
         outputFile: File,
         icons: List<String>,
-        axisConfigs: List<AxisConfig> = emptyList()
+        axisConfigs: List<AxisConfig> = emptyList(),
+        stripHinting: Boolean = true,
+        stripGlyphNames: Boolean = true
     ): Result<SubsetResult> {
         return try {
             if (!inputFile.exists()) {
@@ -442,21 +502,15 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
             // Ensure output directory exists
             outputFile.parentFile?.mkdirs()
             
-            // Perform subsetting
-            val success = if (axisConfigs.isNotEmpty()) {
-                subsetFontWithAxes(
-                    inputFile.absolutePath,
-                    outputFile.absolutePath,
-                    codepoints.toTypedArray(),
-                    axisConfigs
-                )
-            } else {
-                subsetFont(
-                    inputFile.absolutePath,
-                    outputFile.absolutePath,
-                    codepoints.toTypedArray()
-                )
-            }
+            // Perform subsetting with flags
+            val success = subsetFontWithAxesAndFlags(
+                inputFile.absolutePath,
+                outputFile.absolutePath,
+                codepoints.toTypedArray(),
+                axisConfigs,
+                stripHinting,
+                stripGlyphNames
+            )
             
             if (!success || !outputFile.exists()) {
                 return Result.failure(RuntimeException("Font subsetting failed"))

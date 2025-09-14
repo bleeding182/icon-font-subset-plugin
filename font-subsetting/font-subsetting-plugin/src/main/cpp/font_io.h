@@ -17,4 +17,7 @@ FontData read_font_file(const std::string& path);
 // Write font data to disk
 bool write_font_file(const std::string& path, const char* data, size_t size);
 
+// Format file size for display
+std::string format_file_size(size_t size);
+
 #endif // FONTSUBSETTING_FONT_IO_H

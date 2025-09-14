@@ -169,7 +169,9 @@ class FontSubsettingPlugin : Plugin<Project> {
                             maxValue = axis.maxValue.orNull,
                             defaultValue = axis.defaultValue.orNull
                         )
-                    }
+                    },
+                    stripHinting = config.stripHinting.orElse(true).get(),
+                    stripGlyphNames = config.stripGlyphNames.orElse(true).get()
                 )
             }
             
