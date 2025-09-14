@@ -36,13 +36,19 @@ class FontSubsettingPlugin : Plugin<Project> {
     
     private fun configureVariant(project: Project, extension: FontSubsettingExtension, variant: Variant) {
         val variantName = variant.name.replaceFirstChar { it.uppercase() }
-        
+
         val generationTasks = registerGenerationTasks(project, extension, variant, variantName)
         val analysisTask = registerAnalysisTask(project, extension, variant, variantName)
+
+        // Register per-font tasks
+        val fontTasks = registerPerFontTasks(project, extension, variant, variantName)
+
+        // Keep the aggregated subsetting task for backwards compatibility
         val subsettingTask = registerSubsettingTask(project, extension, variant, variantName)
-        
+
         configureSources(variant, generationTasks, subsettingTask)
         configureTaskDependencies(project, variant, variantName, generationTasks, analysisTask, subsettingTask)
+        configurePerFontTaskDependencies(project, fontTasks, analysisTask, subsettingTask)
     }
     
     private fun registerGenerationTasks(
@@ -284,5 +290,121 @@ class FontSubsettingPlugin : Plugin<Project> {
     
     private fun buildSubsettingTaskName(variantName: String): String {
         return "${Constants.TaskNames.SUBSET_FONTS_PREFIX}${variantName}${Constants.TaskNames.SUBSET_FONTS_SUFFIX}"
+    }
+
+    /**
+     * Data class to hold per-font task providers
+     */
+    private data class PerFontTasks(
+        val fontName: String,
+        val infoTask: TaskProvider<FontInfoTask>,
+        val subsetTask: TaskProvider<FontSubsetTask>,
+        val reportTask: TaskProvider<FontReportTask>
+    )
+
+    /**
+     * Registers individual tasks for each font configuration
+     */
+    private fun registerPerFontTasks(
+        project: Project,
+        extension: FontSubsettingExtension,
+        variant: Variant,
+        variantName: String
+    ): List<PerFontTasks> {
+        return extension.fonts.map { fontConfig ->
+            val fontNameCapitalized = fontConfig.name.replaceFirstChar { it.uppercase() }
+
+            // Register font info task
+            val infoTaskName = "font${variantName}${fontNameCapitalized}Info"
+            val infoTask = project.tasks.register(infoTaskName, FontInfoTask::class.java) { task ->
+                task.group = Constants.PLUGIN_GROUP
+                task.description = "Display information about ${fontConfig.name} font for ${variant.name} variant"
+                task.fontFile.set(fontConfig.fontFile)
+                task.outputFormat.set(FontInfoTask.OutputFormat.CONSOLE)
+            }
+
+            // Register individual subset task
+            val subsetTaskName = "subset${variantName}${fontNameCapitalized}Font"
+            val subsetTask = project.tasks.register(subsetTaskName, FontSubsetTask::class.java) { task ->
+                task.group = Constants.PLUGIN_GROUP
+                task.description = "Subset ${fontConfig.name} font for ${variant.name} variant"
+
+                task.inputFont.set(fontConfig.fontFile)
+
+                val outputDir = project.layout.buildDirectory.dir(
+                    "${Constants.Directories.INTERMEDIATES_FONT}/${variant.name}/res/font"
+                )
+                val outputFileName = fontConfig.fontFileName.orElse(
+                    fontConfig.getDefaultFontFileName()
+                ).get()
+                task.outputFont.set(outputDir.map { it.file(outputFileName) })
+
+                task.codepointsFile.set(fontConfig.codepointsFile)
+                task.stripHinting.set(fontConfig.stripHinting.orElse(true))
+                task.stripGlyphNames.set(fontConfig.stripGlyphNames.orElse(true))
+                task.buildDirectory.set(project.layout.buildDirectory)
+
+                // Convert axes configuration
+                val axisSpecs = fontConfig.axes.map { axis ->
+                    FontSubsetTask.AxisSpec(
+                        tag = axis.name,
+                        minValue = axis.minValue.orNull,
+                        maxValue = axis.maxValue.orNull,
+                        defaultValue = axis.defaultValue.orNull,
+                        remove = axis.remove.orElse(false).get()
+                    )
+                }
+                task.axes.set(axisSpecs)
+            }
+
+            // Register font report task
+            val reportTaskName = "font${variantName}${fontNameCapitalized}Report"
+            val reportTask = project.tasks.register(reportTaskName, FontReportTask::class.java) { task ->
+                task.group = Constants.PLUGIN_GROUP
+                task.description = "Generate subsetting report for ${fontConfig.name} font in ${variant.name} variant"
+
+                task.originalFont.set(fontConfig.fontFile)
+                task.subsettedFont.set(subsetTask.flatMap { it.outputFont })
+                task.fontName.set(fontConfig.name)
+            }
+
+            PerFontTasks(fontConfig.name, infoTask, subsetTask, reportTask)
+        }
+    }
+
+    /**
+     * Configure dependencies for per-font tasks
+     */
+    private fun configurePerFontTaskDependencies(
+        project: Project,
+        fontTasks: List<PerFontTasks>,
+        analysisTask: TaskProvider<AnalyzeIconUsageTask>,
+        aggregatedSubsettingTask: TaskProvider<FontSubsettingTask>
+    ) {
+        project.afterEvaluate {
+            // Each subset task depends on analysis task
+            fontTasks.forEach { tasks ->
+                tasks.subsetTask.configure { task ->
+                    task.dependsOn(analysisTask)
+
+                    // Use the new provider-based approach to set glyphs
+                    val usageDataFile = analysisTask.flatMap { it.outputFile }
+                    val codepointsFile = task.codepointsFile // Already set from fontConfig
+
+                    // Wire the providers properly - no doFirst needed!
+                    task.setGlyphsFromUsageData(usageDataFile, codepointsFile)
+                }
+
+                // Report task depends on subset task
+                tasks.reportTask.configure { task ->
+                    task.dependsOn(tasks.subsetTask)
+                }
+
+                // Aggregated task depends on individual subset tasks
+                aggregatedSubsettingTask.configure { task ->
+                    task.dependsOn(tasks.subsetTask)
+                }
+            }
+        }
     }
 }

@@ -91,14 +91,15 @@ abstract class FontSubsettingTask : DefaultTask() {
     @TaskAction
     fun subsetFonts() {
         validateConfigurations()
-        
+
         val outputDir = outputDirectory.get().asFile
         val usedIconNames = loadUsageData()
-        
+
         if (usedIconNames.isEmpty()) {
             logger.warn("No icon usage data found. All configured fonts will be copied without subsetting.")
             copyAllFonts(outputDir)
         } else {
+            logger.lifecycle("Processing ${fontConfigurations.size} font(s) with ${usedIconNames.size} used icons")
             subsetAllFonts(usedIconNames, outputDir)
         }
     }
@@ -179,7 +180,7 @@ abstract class FontSubsettingTask : DefaultTask() {
     }
     
     private fun processFont(fontConfig: FontConfiguration, usedIconNames: Set<String>, outputDir: File) {
-        logger.info("Processing font: ${fontConfig.name}")
+        logger.lifecycle("Processing font: ${fontConfig.name}")
 
         val fontFile = fontConfig.fontFile.get().asFile
         val codepointsFile = fontConfig.codepointsFile.get().asFile
@@ -350,27 +351,13 @@ abstract class FontSubsettingTask : DefaultTask() {
         subsetResult: HarfBuzzSubsetter.SubsetResult
     ) {
         val originalSize = inputFile.length()
-        val originalGlyphs = subsetResult.originalInfo.glyphCount
-        val finalGlyphs = subsetResult.finalInfo.glyphCount
         val finalSize = subsetResult.outputFile.length()
-        
-        logger.info(String.format(Constants.LogMessages.SUBSETTING_COMPLETE, fontName))
-        logger.info("  Glyphs: $originalGlyphs → $finalGlyphs (${subsetResult.glyphsRequested} requested)")
-        logger.info("  Size: ${formatFileSize(originalSize)} → ${formatFileSize(finalSize)}")
-        
-        val totalReduction = if (originalSize > 0) {
+        val reduction = if (originalSize > 0) {
             ((originalSize - finalSize) * 100.0 / originalSize)
         } else 0.0
-        logger.info("  Reduction: ${String.format("%.1f", totalReduction)}%")
-        
-        val originalAxes = subsetResult.originalInfo.axes
-        if (!originalAxes.isNullOrEmpty()) {
-            logger.info("  Original axes: ${originalAxes.size}")
-            val finalAxes = subsetResult.finalInfo.axes
-            if (finalAxes != null && finalAxes.size != originalAxes.size) {
-                logger.info("  Final axes: ${finalAxes.size}")
-            }
-        }
+
+        logger.lifecycle("  ✓ ${fontName}: ${subsetResult.originalInfo.glyphCount} → ${subsetResult.finalInfo.glyphCount} glyphs, " +
+            "${formatFileSize(originalSize)} → ${formatFileSize(finalSize)} (-${String.format("%.1f", reduction)}%)")
     }
     
     private fun generateCacheKey(
