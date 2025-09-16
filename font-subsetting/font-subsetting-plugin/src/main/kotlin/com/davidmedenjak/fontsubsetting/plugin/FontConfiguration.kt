@@ -46,13 +46,6 @@ abstract class FontConfiguration @Inject constructor(
     abstract val resourceName: Property<String>
 
     /**
-     * Font file name used in @Font annotation
-     * This is the actual file name in res/font/ directory
-     * (e.g., "symbols.ttf")
-     */
-    abstract val fontFileName: Property<String>
-
-    /**
      * Whether to strip hinting instructions from the font
      * Hinting can be 15-20% of font size and is unnecessary for icon fonts on high-DPI screens
      * Default: true

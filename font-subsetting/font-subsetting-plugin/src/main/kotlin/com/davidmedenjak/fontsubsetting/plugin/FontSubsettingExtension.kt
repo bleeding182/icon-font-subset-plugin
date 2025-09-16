@@ -33,8 +33,4 @@ abstract class FontSubsettingExtension @Inject constructor(
     fun fonts(action: Action<NamedDomainObjectContainer<FontConfiguration>>) {
         action.execute(fonts)
     }
-
-    fun setDefaults() {
-        // No defaults needed currently
-    }
 }

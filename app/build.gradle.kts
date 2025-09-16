@@ -49,9 +49,8 @@ fontSubsetting {
             className.set("com.davidmedenjak.fontsubsetting.MaterialSymbols")
             // resourceName and fontFileName will default based on font file name
             // but we can override them if needed:
-            resourceName.set("symbolsb")
-            fontFileName.set("symbolsb.ttf")
-            
+            resourceName.set("symbols")
+
             // Configure variable font axes
             axes {
                 // Keep fill axis but limit to 0..1 range

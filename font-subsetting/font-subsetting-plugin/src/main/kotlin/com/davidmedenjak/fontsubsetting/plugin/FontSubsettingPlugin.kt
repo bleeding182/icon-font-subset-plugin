@@ -44,9 +44,25 @@ class FontSubsettingPlugin : Plugin<Project> {
                 val variantName = variant.name.replaceFirstChar { it.uppercase() }
                 val fontName = fontConfig.name.replaceFirstChar { it.uppercase() }
 
-                val generateTask = registerGenerateTask(project, variant, fontConfig, variantName, fontName)
-                val analyzeTask = registerAnalyzeTask(project, variant, fontConfig, generateTask, variantName, fontName)
-                val subsetTask = registerSubsetTask(project, extension, variant, fontConfig, analyzeTask, variantName, fontName)
+                val generateTask =
+                    registerGenerateTask(project, variant, fontConfig, variantName, fontName)
+                val analyzeTask = registerAnalyzeTask(
+                    project,
+                    variant,
+                    fontConfig,
+                    generateTask,
+                    variantName,
+                    fontName
+                )
+                val subsetTask = registerSubsetTask(
+                    project,
+                    extension,
+                    variant,
+                    fontConfig,
+                    analyzeTask,
+                    variantName,
+                    fontName
+                )
 
                 if (firstSubsetTask == null) {
                     firstSubsetTask = subsetTask
@@ -165,9 +181,10 @@ class FontSubsettingPlugin : Plugin<Project> {
 
             task.axes.set(createAxesProvider(project, fontConfig))
 
-            val outputFileName = fontConfig.fontFileName.orElse(
-                fontConfig.fontFile.map { it.asFile.name }
-            )
+            val outputFileName = fontConfig.resourceName.map { name ->
+                val originalExtension = fontConfig.fontFile.get().asFile.extension
+                if (originalExtension.isNotEmpty()) "$name.$originalExtension" else name
+            }.orElse(fontConfig.fontFile.map { it.asFile.name })
 
             task.outputDirectory.set(
                 extension.outputDirectory.dir(variant.name)
