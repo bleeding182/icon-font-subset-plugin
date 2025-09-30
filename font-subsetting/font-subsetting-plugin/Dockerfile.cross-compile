@@ -1,60 +1,41 @@
-# Docker image for cross-compiling native libraries for all platforms
-FROM ubuntu:22.04
+# Docker image for cross-compiling native libraries using Ubuntu 18.04 (glibc 2.27)
+FROM ubuntu:18.04
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install base build tools
+# Install all build tools in one layer
 RUN apt-get update && apt-get install -y \
     build-essential \
-    cmake \
+    ninja-build \
     git \
     wget \
-    curl \
-    ninja-build \
+    mingw-w64 \
+    openjdk-11-jdk \
     pkg-config \
-    python3 \
     autoconf \
     automake \
     libtool \
+    python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cross-compilation toolchains
-RUN apt-get update && apt-get install -y \
-    # MinGW for Windows cross-compilation
-    mingw-w64 \
-    # Clang and LLVM tools for cross-compilation
-    clang-14 \
-    lld-14 \
-    llvm-14 \
-    # Additional tools
-    zip \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+# Install newer CMake (Ubuntu 18.04 ships 3.10, but HarfBuzz needs 3.12+)
+RUN cd /tmp && \
+    wget https://github.com/Kitware/CMake/releases/download/v3.16.9/cmake-3.16.9-Linux-x86_64.sh && \
+    sh cmake-3.16.9-Linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-3.16.9-Linux-x86_64.sh && \
+    cmake --version
 
-# Set up LLVM tools with proper versions
-RUN update-alternatives --install /usr/bin/clang clang /usr/bin/clang-14 100 && \
-    update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-14 100 && \
-    update-alternatives --install /usr/bin/lld lld /usr/bin/lld-14 100 && \
-    update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-14 100
-
-# Install Java for JNI headers (need full JDK for AWT libraries)
-RUN apt-get update && apt-get install -y \
-    openjdk-17-jdk \
-    && rm -rf /var/lib/apt/lists/*
-
-# Set JAVA_HOME and ensure it's correct
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
 ENV PATH=$JAVA_HOME/bin:$PATH
 
 # Verify Java installation
 RUN java -version && javac -version && \
     ls -la $JAVA_HOME/include/ && \
-    ls -la $JAVA_HOME/include/linux/ || true
+    ls -la $JAVA_HOME/include/linux/
 
-# Install dependencies for cross-compilation to macOS
-# We'll use zig as a drop-in C/C++ cross-compiler which includes macOS support
-# Using Zig 0.13.0 for improved macOS cross-compilation support
+# Install Zig for macOS cross-compilation
 RUN cd /tmp && \
     wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && \
     tar xf zig-linux-x86_64-0.13.0.tar.xz && \
@@ -62,36 +43,33 @@ RUN cd /tmp && \
     ln -s /opt/zig/zig /usr/local/bin/zig && \
     rm zig-linux-x86_64-0.13.0.tar.xz
 
-# Create toolchain files first (before building HarfBuzz)
-RUN mkdir -p /toolchains
+# Create Zig wrapper scripts and toolchains for macOS cross-compilation
+RUN mkdir -p /toolchains /workspace/cmake/toolchains /usr/local/bin && \
+    # Zig CC wrappers for macOS \
+    printf '#!/bin/sh\nexec zig cc -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig cc -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-aarch64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-aarch64-macos && \
+    printf '#!/bin/sh\nzig ar "$@"\n' > /usr/local/bin/zig-ar && \
+    printf '#!/bin/sh\nzig ranlib "$@"\n' > /usr/local/bin/zig-ranlib && \
+    chmod +x /usr/local/bin/zig-*
 
-# Windows toolchain
-RUN echo 'set(CMAKE_SYSTEM_NAME Windows)\n\
+# Windows toolchain (MinGW from Ubuntu)
+RUN printf 'set(CMAKE_SYSTEM_NAME Windows)\n\
 set(CMAKE_SYSTEM_PROCESSOR x86_64)\n\
-set(CMAKE_C_COMPILER x86_64-w64-mingw32-gcc)\n\
-set(CMAKE_CXX_COMPILER x86_64-w64-mingw32-g++)\n\
-set(CMAKE_RC_COMPILER x86_64-w64-mingw32-windres)\n\
+set(CMAKE_C_COMPILER /usr/bin/x86_64-w64-mingw32-gcc)\n\
+set(CMAKE_CXX_COMPILER /usr/bin/x86_64-w64-mingw32-g++)\n\
+set(CMAKE_RC_COMPILER /usr/bin/x86_64-w64-mingw32-windres)\n\
 set(CMAKE_FIND_ROOT_PATH /usr/x86_64-w64-mingw32)\n\
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)\n\
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)\n\
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)\n\
 set(CMAKE_SHARED_LIBRARY_LINK_C_FLAGS "")\n\
-set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")' > /toolchains/windows-x86_64.cmake
+set(CMAKE_SHARED_LIBRARY_LINK_CXX_FLAGS "")\n' > /toolchains/windows-x86_64.cmake && \
+    cp /toolchains/windows-x86_64.cmake /workspace/cmake/toolchains/windows-x86_64.cmake
 
-# macOS x86_64 toolchain using Zig
-# Create wrapper scripts for Zig cc/c++ with target and optimization flags
-RUN echo '#!/bin/bash\nexec zig cc -target x86_64-macos-none -Oz "$@"' > /usr/local/bin/zig-cc-x86_64-macos && \
-    chmod +x /usr/local/bin/zig-cc-x86_64-macos && \
-    echo '#!/bin/bash\nexec zig c++ -target x86_64-macos-none -Oz "$@"' > /usr/local/bin/zig-c++-x86_64-macos && \
-    chmod +x /usr/local/bin/zig-c++-x86_64-macos
-
-# Create wrapper for ar command
-RUN echo '#!/bin/bash\nzig ar "$@"' > /usr/local/bin/zig-ar && \
-    chmod +x /usr/local/bin/zig-ar && \
-    echo '#!/bin/bash\nzig ranlib "$@"' > /usr/local/bin/zig-ranlib && \
-    chmod +x /usr/local/bin/zig-ranlib
-
-RUN echo 'set(CMAKE_SYSTEM_NAME Darwin)\n\
+# macOS x86_64 toolchain
+RUN printf 'set(CMAKE_SYSTEM_NAME Darwin)\n\
 set(CMAKE_SYSTEM_PROCESSOR x86_64)\n\
 set(CMAKE_C_COMPILER /usr/local/bin/zig-cc-x86_64-macos)\n\
 set(CMAKE_CXX_COMPILER /usr/local/bin/zig-c++-x86_64-macos)\n\
@@ -108,16 +86,11 @@ set(CMAKE_SHARED_LIBRARY_SUFFIX ".dylib")\n\
 set(CMAKE_C_COMPILER_WORKS 1)\n\
 set(CMAKE_CXX_COMPILER_WORKS 1)\n\
 set(CMAKE_C_ABI_COMPILED 1)\n\
-set(CMAKE_CXX_ABI_COMPILED 1)' > /toolchains/darwin-x86_64.cmake
+set(CMAKE_CXX_ABI_COMPILED 1)\n' > /toolchains/darwin-x86_64.cmake && \
+    cp /toolchains/darwin-x86_64.cmake /workspace/cmake/toolchains/darwin-x86_64.cmake
 
-# macOS ARM64 toolchain using Zig
-# Create wrapper scripts for Zig cc/c++ with target and optimization flags
-RUN echo '#!/bin/bash\nexec zig cc -target aarch64-macos-none -Oz "$@"' > /usr/local/bin/zig-cc-aarch64-macos && \
-    chmod +x /usr/local/bin/zig-cc-aarch64-macos && \
-    echo '#!/bin/bash\nexec zig c++ -target aarch64-macos-none -Oz "$@"' > /usr/local/bin/zig-c++-aarch64-macos && \
-    chmod +x /usr/local/bin/zig-c++-aarch64-macos
-
-RUN echo 'set(CMAKE_SYSTEM_NAME Darwin)\n\
+# macOS ARM64 toolchain
+RUN printf 'set(CMAKE_SYSTEM_NAME Darwin)\n\
 set(CMAKE_SYSTEM_PROCESSOR aarch64)\n\
 set(CMAKE_C_COMPILER /usr/local/bin/zig-cc-aarch64-macos)\n\
 set(CMAKE_CXX_COMPILER /usr/local/bin/zig-c++-aarch64-macos)\n\
@@ -134,12 +107,13 @@ set(CMAKE_SHARED_LIBRARY_SUFFIX ".dylib")\n\
 set(CMAKE_C_COMPILER_WORKS 1)\n\
 set(CMAKE_CXX_COMPILER_WORKS 1)\n\
 set(CMAKE_C_ABI_COMPILED 1)\n\
-set(CMAKE_CXX_ABI_COMPILED 1)' > /toolchains/darwin-aarch64.cmake
+set(CMAKE_CXX_ABI_COMPILED 1)\n' > /toolchains/darwin-aarch64.cmake && \
+    cp /toolchains/darwin-aarch64.cmake /workspace/cmake/toolchains/darwin-aarch64.cmake
 
-# Build and install HarfBuzz from source for all targets
+# Build HarfBuzz from source for all platforms
 WORKDIR /tmp
 
-# Build HarfBuzz for Linux native with minimal features
+# Build HarfBuzz for Linux NATIVELY (targets glibc 2.27 from Ubuntu 18.04)
 RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-linux && \
     cd harfbuzz-linux && \
     mkdir build && cd build && \
@@ -153,20 +127,16 @@ RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git
         -DHB_HAVE_GOBJECT=OFF \
         -DHB_HAVE_ICU=OFF \
         -DHB_HAVE_GRAPHITE2=OFF \
-        -DHB_HAVE_UNISCRIBE=OFF \
-        -DHB_HAVE_DIRECTWRITE=OFF \
-        -DHB_HAVE_CORETEXT=OFF \
         -DHB_BUILD_TESTS=OFF \
         -DHB_BUILD_UTILS=OFF \
         -DBUILD_SHARED_LIBS=OFF \
         -G Ninja && \
     ninja && \
     ninja install && \
-    # Strip the static libraries
     strip --strip-unneeded /usr/local/lib/libharfbuzz*.a && \
     cd /tmp && rm -rf harfbuzz-linux
 
-# Build HarfBuzz for Windows (MinGW) with minimal features
+# Build HarfBuzz for Windows (MinGW) - minimal features
 RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-windows && \
     cd harfbuzz-windows && \
     mkdir build && cd build && \
@@ -193,7 +163,7 @@ RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git
     x86_64-w64-mingw32-strip --strip-unneeded /usr/x86_64-w64-mingw32/lib/libharfbuzz*.a && \
     cd /tmp && rm -rf harfbuzz-windows
 
-# Build HarfBuzz for macOS x86_64 (using Zig) with minimal features
+# Build HarfBuzz for macOS x86_64 (Zig cross-compilation) - minimal features
 RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-darwin-x86_64 && \
     cd harfbuzz-darwin-x86_64 && \
     mkdir build && cd build && \
@@ -218,7 +188,7 @@ RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git
     ninja install && \
     cd /tmp && rm -rf harfbuzz-darwin-x86_64
 
-# Build HarfBuzz for macOS ARM64 (using Zig) with minimal features
+# Build HarfBuzz for macOS ARM64 (Zig cross-compilation) - minimal features
 RUN git clone --depth 1 --branch 10.0.1 https://github.com/harfbuzz/harfbuzz.git harfbuzz-darwin-aarch64 && \
     cd harfbuzz-darwin-aarch64 && \
     mkdir build && cd build && \

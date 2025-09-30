@@ -54,7 +54,12 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         
         private fun loadFromResources() {
             val (osName, archName, libName) = getPlatformInfo()
-            
+
+//            // For Linux, load musl first for zero-dependency operation
+//            if (osName == "linux") {
+//                loadMuslFromResources(archName)
+//            }
+
             // Build list of paths to try, from most specific to least specific
             val resourcePaths = buildList {
                 // Platform-specific paths with normalized architecture
@@ -143,7 +148,65 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
             
             System.load(tempFile.absolutePath)
         }
-        
+
+//        private fun loadMuslFromResources(archName: String) {
+//            // Try to load bundled musl loader for zero-dependency Linux operation
+//            val muslName = "ld-musl-$archName.so.1"
+//
+//            // Build list of paths to try
+//            val resourcePaths = buildList {
+//                add("/native/linux-$archName/$muslName")
+//                add("/native-cross/linux-$archName/$muslName")
+//
+//                // Alternative architecture names
+//                when (archName) {
+//                    "x86_64" -> {
+//                        add("/native/linux-amd64/ld-musl-amd64.so.1")
+//                        add("/native/linux-x86_64/ld-musl-x86_64.so.1")
+//                    }
+//                    "aarch64" -> {
+//                        add("/native/linux-arm64/ld-musl-arm64.so.1")
+//                        add("/native/linux-aarch64/ld-musl-aarch64.so.1")
+//                    }
+//                }
+//            }
+//
+//            var inputStream: java.io.InputStream? = null
+//
+//            for (path in resourcePaths) {
+//                inputStream = HarfBuzzSubsetter::class.java.getResourceAsStream(path)
+//                if (inputStream != null) {
+//                    break
+//                }
+//            }
+//
+//            if (inputStream == null) {
+//                // Musl not bundled - will fall back to system musl if available
+//                return
+//            }
+//
+//            try {
+//                // Extract musl to temp file
+//                val tempFile = File.createTempFile("ld-musl-", ".so.1")
+//                tempFile.deleteOnExit()
+//
+//                inputStream.use { input ->
+//                    tempFile.outputStream().use { output ->
+//                        input.copyTo(output)
+//                    }
+//                }
+//
+//                // Make executable
+//                tempFile.setExecutable(true)
+//
+//                // Load musl - this makes it available for fontsubsetting.so to use
+//                System.load(tempFile.absolutePath)
+//            } catch (e: Exception) {
+//                // If loading bundled musl fails, continue - system musl may work
+//                // Silent failure is acceptable here as this is an optimization
+//            }
+//        }
+
         private fun getPlatformInfo(): Triple<String, String, String> {
             val os = System.getProperty("os.name").lowercase()
             val arch = System.getProperty("os.arch").lowercase()

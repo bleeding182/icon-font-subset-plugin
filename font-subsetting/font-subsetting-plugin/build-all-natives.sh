@@ -12,10 +12,13 @@ OUTPUT_DIR="${SCRIPT_DIR}/src/main/resources/native"
 
 # Ensure JAVA_HOME is set
 if [ -z "$JAVA_HOME" ]; then
-    if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
-        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
-    elif [ -d "/usr/lib/jvm/java-11-openjdk-amd64" ]; then
+    # Try Ubuntu paths
+    if [ -d "/usr/lib/jvm/java-11-openjdk-amd64" ]; then
         export JAVA_HOME="/usr/lib/jvm/java-11-openjdk-amd64"
+    elif [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+    elif [ -d "/usr/lib/jvm/java-1.8.0-openjdk" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-1.8.0-openjdk"
     else
         echo "ERROR: JAVA_HOME not set and could not find Java installation"
         exit 1
@@ -87,7 +90,7 @@ build_platform() {
     fi
 }
 
-# Build for Linux x86_64 (native)
+# Build for Linux x86_64 NATIVELY (targets glibc 2.17 from manylinux2014 for maximum compatibility)
 build_platform "linux-x86_64" "" "libfontsubsetting.so" "linux-x86_64"
 
 # Build for Windows x86_64 (MinGW cross-compilation)

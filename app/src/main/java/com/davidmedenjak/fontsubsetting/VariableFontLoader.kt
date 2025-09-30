@@ -1,6 +1,5 @@
 package com.davidmedenjak.fontsubsetting
 
-import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
@@ -10,7 +9,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontVariation
 
-private val cachedFontResource = R.font.symbolsb
+private val cachedFontResource = R.font.symbols
 
 @OptIn(ExperimentalTextApi::class)
 @Stable

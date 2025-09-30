@@ -89,15 +89,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR WIN32 OR MINGW)
     # Windows or MinGW cross-compilation
     # For cross-compilation, we use the Linux JDK's headers which are compatible
     if(JAVA_HOME)
-        set(JNI_INCLUDE_DIRS 
+        set(JNI_INCLUDE_DIRS
             ${JAVA_HOME}/include
             ${JAVA_HOME}/include/linux  # Use linux headers for cross-compilation
         )
     else()
-        # Fallback for cross-compilation from Linux
-        set(JNI_INCLUDE_DIRS 
-            /usr/lib/jvm/java-17-openjdk-amd64/include
-            /usr/lib/jvm/java-17-openjdk-amd64/include/linux
+        # Fallback for manylinux2014 (CentOS 7)
+        set(JNI_INCLUDE_DIRS
+            /usr/lib/jvm/java-1.8.0-openjdk/include
+            /usr/lib/jvm/java-1.8.0-openjdk/include/linux
         )
     endif()
     set(JNI_LIBRARIES "")  # We don't need to link JVM libraries for JNI
@@ -106,15 +106,15 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     # macOS cross-compilation from Linux - use Linux JNI headers
     # The JNI headers are platform-independent for the most part
     if(JAVA_HOME)
-        set(JNI_INCLUDE_DIRS 
+        set(JNI_INCLUDE_DIRS
             ${JAVA_HOME}/include
             ${JAVA_HOME}/include/linux  # Use Linux headers for cross-compilation
         )
     else()
-        # Fallback for cross-compilation from Linux
-        set(JNI_INCLUDE_DIRS 
-            /usr/lib/jvm/java-17-openjdk-amd64/include
-            /usr/lib/jvm/java-17-openjdk-amd64/include/linux
+        # Fallback for Ubuntu
+        set(JNI_INCLUDE_DIRS
+            /usr/lib/jvm/java-11-openjdk-amd64/include
+            /usr/lib/jvm/java-11-openjdk-amd64/include/linux
         )
     endif()
     set(JNI_LIBRARIES "")
@@ -153,10 +153,10 @@ message(STATUS "JNI include dirs: ${JNI_INCLUDE_DIRS}")
 # Find HarfBuzz
 # We've pre-installed HarfBuzz in the Docker container
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR WIN32 OR MINGW)
-    # For Windows cross-compilation
+    # For Windows cross-compilation (Ubuntu MinGW paths)
     set(HARFBUZZ_INCLUDE_DIRS /usr/x86_64-w64-mingw32/include/harfbuzz)
-    # Windows needs both libraries, subset first then harfbuzz
-    set(HARFBUZZ_LIBRARIES 
+    # Link both libraries - subset needs base library symbols
+    set(HARFBUZZ_LIBRARIES
         /usr/x86_64-w64-mingw32/lib/libharfbuzz-subset.a
         /usr/x86_64-w64-mingw32/lib/libharfbuzz.a
     )
@@ -166,14 +166,14 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
     if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
         # ARM64 macOS
         set(HARFBUZZ_INCLUDE_DIRS /usr/local/darwin-aarch64/include/harfbuzz)
-        set(HARFBUZZ_LIBRARIES 
+        set(HARFBUZZ_LIBRARIES
             /usr/local/darwin-aarch64/lib/libharfbuzz-subset.a
             /usr/local/darwin-aarch64/lib/libharfbuzz.a
         )
     else()
         # x86_64 macOS
         set(HARFBUZZ_INCLUDE_DIRS /usr/local/darwin-x86_64/include/harfbuzz)
-        set(HARFBUZZ_LIBRARIES 
+        set(HARFBUZZ_LIBRARIES
             /usr/local/darwin-x86_64/lib/libharfbuzz-subset.a
             /usr/local/darwin-x86_64/lib/libharfbuzz.a
         )
@@ -183,19 +183,22 @@ else()
     # For Linux native build
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
-        # Use both libraries but in correct order
+        # Link only the subset library which includes all needed symbols
         pkg_check_modules(HARFBUZZ_SUBSET harfbuzz-subset)
         if(HARFBUZZ_SUBSET_FOUND)
             set(HARFBUZZ_INCLUDE_DIRS ${HARFBUZZ_SUBSET_INCLUDE_DIRS})
-            # Only link harfbuzz-subset which includes all needed symbols
-            set(HARFBUZZ_LIBRARIES "/usr/local/lib/libharfbuzz-subset.a")
+            # Link both libraries - subset needs base library symbols
+            set(HARFBUZZ_LIBRARIES
+                "/usr/local/lib/libharfbuzz-subset.a"
+                "/usr/local/lib/libharfbuzz.a"
+            )
             set(HARFBUZZ_FOUND TRUE)
         endif()
     endif()
-    
+
     if(NOT HARFBUZZ_FOUND)
         # Fallback to manual search
-        find_path(HARFBUZZ_INCLUDE_DIRS 
+        find_path(HARFBUZZ_INCLUDE_DIRS
             NAMES hb.h
             PATHS /usr/local/include/harfbuzz /usr/include/harfbuzz
         )
@@ -208,8 +211,11 @@ else()
             PATHS /usr/local/lib /usr/lib
         )
         if(HARFBUZZ_INCLUDE_DIRS AND HARFBUZZ_LIBRARY AND HARFBUZZ_SUBSET_LIBRARY)
-            # Only link against harfbuzz-subset as it includes all needed symbols
-            set(HARFBUZZ_LIBRARIES ${HARFBUZZ_SUBSET_LIBRARY})
+            # Link both libraries - subset needs base library symbols
+            set(HARFBUZZ_LIBRARIES
+                ${HARFBUZZ_SUBSET_LIBRARY}
+                ${HARFBUZZ_LIBRARY}
+            )
             set(HARFBUZZ_FOUND TRUE)
         endif()
     endif()
@@ -249,26 +255,18 @@ target_include_directories(fontsubsetting PRIVATE
 )
 
 # Link libraries
-# For Linux, we need special handling due to duplicate symbols in static HarfBuzz libraries
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT CMAKE_CROSSCOMPILING)
-    target_link_libraries(fontsubsetting 
-        -Wl,--allow-multiple-definition
-        -Wl,--exclude-libs,ALL
-        ${HARFBUZZ_LIBRARIES}
-    )
-elseif(WIN32)
+if(WIN32)
     if(MINGW)
-        # For MinGW, link everything statically
-        # Also allow multiple definitions due to HarfBuzz static lib issue
-        target_link_libraries(fontsubsetting 
+        # For MinGW, link everything statically except Windows system DLLs
+        # Static libs must come before -static-libgcc/-static-libstdc++ flags
+        target_link_libraries(fontsubsetting
             -Wl,--allow-multiple-definition
             -Wl,--exclude-libs,ALL
             ${HARFBUZZ_LIBRARIES}
-            -static
-            -static-libgcc
-            -static-libstdc++
             -Wl,-Bstatic
             -lwinpthread
+            -static-libgcc
+            -static-libstdc++
             -Wl,-Bdynamic
             -lkernel32
             -luser32
@@ -279,14 +277,26 @@ elseif(WIN32)
         )
     else()
         # For MSVC
-        target_link_libraries(fontsubsetting 
+        target_link_libraries(fontsubsetting
             ${HARFBUZZ_LIBRARIES}
             kernel32.lib
             user32.lib
         )
     endif()
+elseif(NOT APPLE)
+    # Linux - link HarfBuzz statically
+    # Force inclusion of all needed symbols by putting static libs at the end
+    target_link_libraries(fontsubsetting
+        ${HARFBUZZ_LIBRARIES}
+    )
+    # Ensure we don't have undefined symbols at link time
+    # Allow multiple definitions due to overlap between libharfbuzz-subset and libharfbuzz
+    set_target_properties(fontsubsetting PROPERTIES
+        LINK_FLAGS "-Wl,--no-undefined -Wl,--allow-multiple-definition"
+    )
 else()
-    target_link_libraries(fontsubsetting 
+    # macOS
+    target_link_libraries(fontsubsetting
         ${HARFBUZZ_LIBRARIES}
     )
 endif()

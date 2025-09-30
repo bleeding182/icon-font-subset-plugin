@@ -36,6 +36,11 @@ font-subsetting/font-subsetting-plugin/cmake-build*/
 font-subsetting/font-subsetting-plugin/build/native-cross/
 .docker-image-id
 
+# Native binaries (generated via build-in-docker.sh)
+**/src/main/resources/native/**/*.so
+**/src/main/resources/native/**/*.dll
+**/src/main/resources/native/**/*.dylib
+
 # Kotlin/Java
 *.class
 *.jar
