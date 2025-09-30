@@ -42,6 +42,25 @@ kotlin {
     }
 }
 
+// Copy native libraries from staging directory (used in CI) into build directory
+val copyNativeLibraries by tasks.registering(Copy::class) {
+    from(layout.projectDirectory.dir("native-libs-staging")) {
+        include("**/*.so", "**/*.dll", "**/*.dylib")
+    }
+    into(layout.buildDirectory.dir("resources/main/native"))
+
+    // Declare inputs/outputs for proper incremental build support
+    inputs.dir(layout.projectDirectory.dir("native-libs-staging"))
+        .withPropertyName("nativeStagingDir")
+        .optional()
+    outputs.dir(layout.buildDirectory.dir("resources/main/native"))
+        .withPropertyName("nativeOutputDir")
+}
+
+tasks.named<ProcessResources>("processResources") {
+    // Implicit dependency via input/output relationship
+    from(copyNativeLibraries)
+}
 
 // Configure the gradle plugin
 gradlePlugin {
