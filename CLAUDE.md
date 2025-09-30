@@ -1,44 +1,49 @@
 # CLAUDE.md
 
-Guidance for Claude Code (claude.ai/code) when working with this repository.
+Guidance for Claude Code when working with this repository.
 
 ## Project Structure
 
-- `font-subsetting/` - Gradle plugin with HarfBuzz JNI wrapper
-  - `font-subsetting-plugin/` - Main plugin implementation
-  - `src/main/cpp/` - Native C++ code with HarfBuzz integration
-  - `src/main/resources/native/` - Pre-built native libraries for all platforms
-- `app/` - Demo Android application using the plugin
+```
+plugin/                          - Gradle plugin (included build via pluginManagement)
+  src/main/cpp/                  - Native C++ for HarfBuzz font subsetting (JVM)
+  src/main/kotlin/.../plugin/    - Plugin tasks, DSL, services
+  build-in-docker.sh             - Cross-compile native libs (Docker required)
+demo/                            - Demo Android app using plugin + glyph rendering
+font-subsetting/                 - Maven publishing modules (scaffolding)
+  font-subsetting-native/        - Native lib resource packaging (only active module)
+res/                             - Font resources
+```
+
+Key: `plugin/` is a separate included build (see `settings.gradle.kts`). The main project only includes `:demo`.
 
 ## Build Commands
 
 ```bash
-# Clean and rebuild entire project
-./gradlew clean build
+./gradlew clean build                              # Clean and rebuild
+./gradlew :demo:assembleDebug                      # Build demo app
+./gradlew :demo:subsetDebugFonts --info            # Test font subsetting
 
-# Build native libraries (Docker required, cross-compiles for all platforms)
-cd font-subsetting/font-subsetting-plugin
-./build-in-docker.sh
-
-# Test font subsetting in demo app
-./gradlew :app:subsetDebugFonts --info
-
-# Build demo app
-./gradlew :app:assembleDebug
+# Build native libs for plugin's JVM subsetting (Docker required, cross-compiles for all platforms)
+cd plugin && ./build-in-docker.sh
 ```
 
 ## Plugin Architecture
 
-Three Gradle tasks are registered per Android variant:
+Plugin ID: `com.davidmedenjak.fontsubsetting`
 
-1. **GenerateIconConstantsTask** - Parses `.codepoints` files → Generates Kotlin icon constants
-2. **AnalyzeIconUsageTask** - PSI analysis of Kotlin code → Outputs JSON with used icons
-3. **FontSubsettingTask** - HarfBuzz subsetting → Creates optimized font with only used glyphs
+Three Gradle tasks registered per Android variant:
+
+1. **GenerateIconConstantsTask** - Parses `.codepoints` files -> Generates Kotlin icon constants
+2. **AnalyzeIconUsageTask** - PSI analysis of Kotlin source -> Outputs JSON with used icons
+3. **FontSubsettingTask** - HarfBuzz subsetting -> Creates optimized font with only used glyphs
+
+Task source: `plugin/src/main/kotlin/com/davidmedenjak/fontsubsetting/plugin/tasks/`
 
 ## Configuration
 
 ```kotlin
-// In app/build.gradle.kts
+// In demo/build.gradle.kts
 plugins {
     id("com.davidmedenjak.fontsubsetting") version "local" // Uses included build
 }
@@ -48,14 +53,12 @@ fontSubsetting {
         create("materialSymbols") {
             fontFile.set(file("path/to/font.ttf"))
             codepointsFile.set(file("path/to/font.codepoints"))
-            packageName.set("com.example")
-            className.set("Icons")
+            className.set("com.example.pkg.Icons")  // Fully-qualified class name (package derived from this)
+            resourceName.set("symbols")              // Matches font filename in res/font/
 
-            // Font optimization flags (optional, default: true)
-            stripHinting.set(true)      // Remove hinting instructions (15-20% size reduction)
-            stripGlyphNames.set(true)   // Remove glyph names (5-10% size reduction)
+            stripHinting.set(true)      // Remove hinting (15-20% size reduction, default: true)
+            stripGlyphNames.set(true)   // Remove glyph names (5-10% size reduction, default: true)
 
-            // Variable font axes (optional)
             axes {
                 axis("FILL").range(0f, 1f, 0f)
                 axis("wght").range(400f, 700f, 400f)
@@ -66,32 +69,18 @@ fontSubsetting {
 }
 ```
 
-## Technical Details
+## Glyph Rendering (in demo)
 
-- **Kotlin Analysis**: Uses `kotlin-compiler-embeddable` for PSI/AST parsing
-- **HarfBuzz**: Version 10.0.1 for subsetting with full flag support
-- **Subsetting Flags**:
-  - `HB_SUBSET_FLAGS_NO_HINTING` - Strips TrueType hinting
-  - `HB_SUBSET_FLAGS_DESUBROUTINIZE` - Removes CFF subroutines
-  - `HB_SUBSET_FLAGS_GLYPH_NAMES` - Controls glyph name retention
-- **Caching**: Subsetted fonts cached in `build/fontSubsetting/cache/` with SHA-256 keys
-- **Native Libraries**: Pre-built for Linux x86_64, Windows x86_64, macOS x86_64, macOS ARM64
-- **Generated Code**: Icon constants are `internal` to prevent API leakage
+The demo includes `Glyph.kt` with Paint + Canvas rendering for subsetted icon fonts:
 
-## Development Workflow
-
-The plugin uses Gradle's composite build feature (configured in `settings.gradle.kts`):
-- Version `"local"` uses the included build directly - no publishing needed
-- Other versions resolve from Maven repositories
-
-To develop:
-1. Modify plugin code in `font-subsetting/`
-2. If native code changed: `./font-subsetting/font-subsetting-plugin/build-in-docker.sh`
-3. Test directly: `./gradlew :app:subsetDebugFonts --info`
+- **GlyphFont** — `@Immutable` wrapper around Android `Typeface`
+- **Glyph()** — Composable that renders via `Paint` + `Canvas.drawText()` (Skia GPU glyph caching)
+- **rememberGlyphFont()** — Loads a `Typeface` from a font resource
+- Variable font axes via `Paint.fontVariationSettings` (API 26+; on API 24-25 uses font defaults)
+- Icon sizes in `dp` (not `sp`) — icons don't scale with text size preferences
 
 ## Troubleshooting
 
-- **Native Library Not Found**: Run `build-in-docker.sh` to build for all platforms
 - **Icons Not Found**: Plugin handles both camelCase and snake_case naming
 - **Stale Results**: Run `./gradlew clean` to clear caches
-- **Daemon Crashes**: Check for JNI method signature mismatches between Kotlin and C++
+- **Axes Not Working**: `fontVariationSettings` requires API 26+; on API 24-25, axes are ignored
