@@ -1,0 +1,8 @@
+{
+  global:
+    # Export only JNI functions
+    Java_com_davidmedenjak_fontsubsetting_native_HarfBuzzSubsetter_*;
+  local:
+    # Hide all other symbols (including HarfBuzz internals)
+    *;
+};

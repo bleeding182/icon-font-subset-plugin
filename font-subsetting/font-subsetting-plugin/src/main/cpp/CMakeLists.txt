@@ -32,9 +32,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Os -fno-exceptions -fno-rtti")
         set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -Os")
         
-        # Visibility settings - hide all symbols by default
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fvisibility=hidden -fvisibility-inlines-hidden")
-        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -fvisibility=hidden")
+        # Visibility settings - hide all symbols by default (already configured for target below)
+        # These flags help the compiler optimize better when symbols are hidden
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden -fvisibility-inlines-hidden")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
         
         # Enable function and data sections for better dead code elimination
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffunction-sections -fdata-sections")
@@ -291,13 +292,21 @@ elseif(NOT APPLE)
     )
     # Ensure we don't have undefined symbols at link time
     # Allow multiple definitions due to overlap between libharfbuzz-subset and libharfbuzz
+    # Use version script to hide HarfBuzz symbols and only export JNI functions
     set_target_properties(fontsubsetting PROPERTIES
-        LINK_FLAGS "-Wl,--no-undefined -Wl,--allow-multiple-definition"
+        LINK_FLAGS "-Wl,--no-undefined -Wl,--allow-multiple-definition -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fontsubsetting.map"
     )
 else()
-    # macOS
+    # macOS - hide HarfBuzz symbols and only export JNI functions
     target_link_libraries(fontsubsetting
         ${HARFBUZZ_LIBRARIES}
+    )
+    # Zig linker doesn't support -exported_symbols_list, but we already have -fvisibility=hidden
+    # which hides all symbols by default. JNI functions are exported via __attribute__((visibility("default")))
+    # in the source code, so they will be visible.
+    # Use dead_strip to remove unused code
+    set_target_properties(fontsubsetting PROPERTIES
+        LINK_FLAGS "-Wl,-dead_strip"
     )
 endif()
 

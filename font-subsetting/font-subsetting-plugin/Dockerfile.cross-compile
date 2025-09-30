@@ -80,12 +80,16 @@ RUN cd /tmp && \
     git clone --depth 1 --branch ${HARFBUZZ_VERSION} https://github.com/harfbuzz/harfbuzz.git
 
 # Build HarfBuzz for Linux (native, targets glibc 2.27)
+# Size optimization flags explained:
+# - HB_NO_FALLBACK_SHAPE: Removes unused fallback shaper (we only use OT subsetting)
+# - HB_NO_MT: Disables thread-safety (not needed for JNI single-threaded usage)
+# Note: Cannot use HB_LEAN as it disables variable font APIs we need for axis manipulation
 RUN mkdir -p /tmp/harfbuzz/build-linux && cd /tmp/harfbuzz/build-linux && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
-        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
         -DHB_HAVE_FREETYPE=OFF \
         -DHB_HAVE_GLIB=OFF \
         -DHB_HAVE_GOBJECT=OFF \
@@ -104,8 +108,8 @@ RUN mkdir -p /tmp/harfbuzz/build-windows && cd /tmp/harfbuzz/build-windows && \
     cmake .. \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
-        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
         -DHB_HAVE_FREETYPE=OFF \
         -DHB_HAVE_GLIB=OFF \
         -DHB_HAVE_GOBJECT=OFF \
@@ -128,8 +132,8 @@ RUN mkdir -p /tmp/harfbuzz/build-darwin-x86_64 && cd /tmp/harfbuzz/build-darwin-
     cmake .. \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
-        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
         -DHB_HAVE_FREETYPE=OFF \
         -DHB_HAVE_GLIB=OFF \
         -DHB_HAVE_GOBJECT=OFF \
@@ -150,8 +154,8 @@ RUN mkdir -p /tmp/harfbuzz/build-darwin-aarch64 && cd /tmp/harfbuzz/build-darwin
     cmake .. \
         -DCMAKE_BUILD_TYPE=MinSizeRel \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections" \
-        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti" \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
         -DHB_HAVE_FREETYPE=OFF \
         -DHB_HAVE_GLIB=OFF \
         -DHB_HAVE_GOBJECT=OFF \
