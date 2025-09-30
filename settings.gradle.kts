@@ -1,10 +1,8 @@
-pluginManagement {
+﻿pluginManagement {
     // Include the plugin build for composite builds - must be in pluginManagement for plugin resolution
-    includeBuild("font-subsetting")
+    includeBuild("plugin")
     
     repositories {
-        mavenLocal() // For local SNAPSHOT builds
-        
         // Load credentials from local.properties
         val localProperties = java.util.Properties()
         val localPropertiesFile = file("local.properties")
@@ -44,4 +42,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Font Subsetting"
-include(":app")
+include(":demo")

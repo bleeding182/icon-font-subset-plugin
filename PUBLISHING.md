@@ -14,12 +14,11 @@
 
 ```bash
 # Build native libraries
-cd font-subsetting/font-subsetting-plugin
+cd plugin
 ./build-in-docker.sh
 
 # Test locally
-./gradlew :font-subsetting:publishToMavenLocal
-./gradlew :app:assembleDebug
+./gradlew :demo:assembleDebug
 ```
 
 ## Manual Publishing
@@ -30,10 +29,9 @@ export PLUGIN_VERSION=1.0.0
 
 # Test and validate
 ./gradlew test
-./gradlew :font-subsetting:font-subsetting-plugin:validatePlugin
 
 # Publish
-./gradlew :font-subsetting:font-subsetting-plugin:publishPlugins \
+./gradlew -p plugin publishPlugins \
   -Pgradle.publish.key=$GRADLE_PUBLISH_KEY \
   -Pgradle.publish.secret=$GRADLE_PUBLISH_SECRET
 ```
@@ -60,7 +58,7 @@ GitHub Actions will automatically build, test, and publish.
 
 ## Troubleshooting
 
-- **Shadow JAR**: Check `build/libs/` if task appears stuck
-- **Native Libraries**: Verify with `jar tf build/libs/*.jar | grep -E "\.(dll|so|dylib)$"`
+- **Shadow JAR**: Check `plugin/build/libs/` if task appears stuck
+- **Native Libraries**: Verify with `jar tf plugin/build/libs/*.jar | grep -E "\.(dll|so|dylib)$"`
 - **Publishing**: Versions are immutable once published
 - **Credentials**: Never commit to repo, use environment variables
