@@ -1,0 +1,40 @@
+# Exclude build artifacts and intermediate files from Docker context
+build/
+.gradle/
+*.class
+*.jar
+*.o
+*.so
+*.dll
+*.dylib
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+!CLAUDE.md
+
+# Gradle wrapper (not needed in Docker)
+gradle/
+gradlew
+gradlew.bat
+
+# Docker artifacts
+.docker-image-id
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep these files needed for build
+!src/
+!cmake/
+!build-all-natives.sh
+!CMakeLists.txt
