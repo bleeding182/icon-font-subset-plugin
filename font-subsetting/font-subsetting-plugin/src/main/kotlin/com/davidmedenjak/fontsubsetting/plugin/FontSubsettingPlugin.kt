@@ -15,6 +15,12 @@ import org.gradle.api.tasks.TaskProvider
 
 class FontSubsettingPlugin : Plugin<Project> {
 
+    companion object {
+        private const val KOTLIN_COMPILER_EMBEDDABLE = "org.jetbrains.kotlin:kotlin-compiler-embeddable"
+        // Use the same version as the project's Kotlin version
+        private const val KOTLIN_VERSION = "2.2.10"
+    }
+
     override fun apply(project: Project) {
         val extension = project.extensions.create(
             "fontSubsetting",
@@ -25,16 +31,45 @@ class FontSubsettingPlugin : Plugin<Project> {
             project.layout.buildDirectory.dir("generated/res/fontSubsetting")
         )
 
+        // Configure isolated Kotlin compiler classpath for Workers API
+        // This prevents classloader conflicts with KGP (Kotlin 2.1+ requirement)
+        val kotlinCompilerClasspath = createKotlinCompilerConfiguration(project)
+
         project.plugins.withType(AppPlugin::class.java) {
-            configureAndroidProject(project, extension)
+            configureAndroidProject(project, extension, kotlinCompilerClasspath)
         }
 
         project.plugins.withType(LibraryPlugin::class.java) {
-            configureAndroidProject(project, extension)
+            configureAndroidProject(project, extension, kotlinCompilerClasspath)
         }
     }
 
-    private fun configureAndroidProject(project: Project, extension: FontSubsettingExtension) {
+    private fun createKotlinCompilerConfiguration(project: Project): org.gradle.api.file.FileCollection {
+        // Create a detached configuration to avoid affecting other parts of the build
+        val compilerDependencyScope = project.configurations.create("fontSubsettingKotlinCompiler") {
+            it.isVisible = false
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = false
+        }
+
+        project.dependencies.add(compilerDependencyScope.name, "$KOTLIN_COMPILER_EMBEDDABLE:$KOTLIN_VERSION")
+
+        // Create resolvable configuration
+        val resolvableConfiguration = project.configurations.create("fontSubsettingKotlinCompilerResolvable") {
+            it.isVisible = false
+            it.isCanBeConsumed = false
+            it.isCanBeResolved = true
+            it.extendsFrom(compilerDependencyScope)
+        }
+
+        return resolvableConfiguration
+    }
+
+    private fun configureAndroidProject(
+        project: Project,
+        extension: FontSubsettingExtension,
+        kotlinCompilerClasspath: org.gradle.api.file.FileCollection
+    ) {
         val androidComponents = project.extensions.getByType(AndroidComponentsExtension::class.java)
 
         androidComponents.onVariants { variant ->
@@ -52,7 +87,8 @@ class FontSubsettingPlugin : Plugin<Project> {
                     fontConfig,
                     generateTask,
                     variantName,
-                    fontName
+                    fontName,
+                    kotlinCompilerClasspath
                 )
                 val subsetTask = registerSubsetTask(
                     project,
@@ -111,7 +147,8 @@ class FontSubsettingPlugin : Plugin<Project> {
         fontConfig: FontConfiguration,
         generateTask: TaskProvider<GenerateIconConstantsTask>,
         variantName: String,
-        fontName: String
+        fontName: String,
+        kotlinCompilerClasspath: org.gradle.api.file.FileCollection
     ): TaskProvider<AnalyzeIconUsageTask> {
         return project.tasks.register(
             "analyze${variantName}${fontName}Usage",
@@ -123,6 +160,9 @@ class FontSubsettingPlugin : Plugin<Project> {
             task.targetClasses.set(
                 generateTask.flatMap { it.fullyQualifiedClassName }.map { listOf(it) }
             )
+
+            // Configure isolated Kotlin compiler classpath
+            task.kotlinCompilerClasspath.from(kotlinCompilerClasspath)
 
             configureSourceSets(project, task)
 

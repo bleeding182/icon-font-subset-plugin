@@ -23,7 +23,9 @@ dependencies {
     implementation(libs.gson)
     
     // For PSI-based source code analysis
-    implementation(libs.kotlin.compiler.embeddable)
+    // Using compileOnly to avoid classloader conflicts with KGP (Kotlin 2.1+ requirement)
+    // Runtime classpath configured via Workers API with isolated classloader
+    compileOnly(libs.kotlin.compiler.embeddable)
     
     testImplementation(libs.junit)
     testImplementation(libs.assertj)

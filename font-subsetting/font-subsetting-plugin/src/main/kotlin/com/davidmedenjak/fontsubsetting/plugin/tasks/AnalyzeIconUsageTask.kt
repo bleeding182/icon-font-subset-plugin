@@ -1,12 +1,13 @@
 package com.davidmedenjak.fontsubsetting.plugin.tasks
 
-import com.davidmedenjak.fontsubsetting.analyzer.KotlinIconUsageAnalyzer
+import com.davidmedenjak.fontsubsetting.analyzer.KotlinAnalysisWorkerAction
 import com.davidmedenjak.fontsubsetting.plugin.Constants
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.RegularFileProperty
 import org.gradle.api.provider.ListProperty
 import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Classpath
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFiles
 import org.gradle.api.tasks.OutputFile
@@ -14,13 +15,21 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.SkipWhenEmpty
 import org.gradle.api.tasks.TaskAction
-import java.util.logging.Handler
-import java.util.logging.Level
-import java.util.logging.LogRecord
-import java.util.logging.Logger
+import org.gradle.workers.WorkerExecutor
+import javax.inject.Inject
 
+/**
+ * Task that analyzes Kotlin source files to find icon constant usage.
+ *
+ * This task uses the Gradle Workers API with classloader isolation to run the analysis,
+ * preventing classloader conflicts with the Kotlin Gradle Plugin (KGP) as recommended
+ * by Kotlin 2.1+.
+ */
 @CacheableTask
 abstract class AnalyzeIconUsageTask : DefaultTask() {
+
+    @get:Inject
+    abstract val workerExecutor: WorkerExecutor
 
     @get:InputFiles
     @get:SkipWhenEmpty
@@ -33,6 +42,13 @@ abstract class AnalyzeIconUsageTask : DefaultTask() {
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
 
+    /**
+     * Classpath containing kotlin-compiler-embeddable for isolated execution.
+     * This is configured by the plugin to prevent conflicts with KGP.
+     */
+    @get:Classpath
+    abstract val kotlinCompilerClasspath: ConfigurableFileCollection
+
     init {
         group = Constants.PLUGIN_GROUP
         description = "Analyzes Kotlin source files to find icon constant usage"
@@ -43,41 +59,20 @@ abstract class AnalyzeIconUsageTask : DefaultTask() {
         val targetClassList = targetClasses.get()
         logger.info("Analyzing icon usage for ${targetClassList.size} target class(es)")
 
-        val analyzer = KotlinIconUsageAnalyzer(
-            targetClasses = targetClassList,
-            logger = Logger.getLogger(this::class.java.name).apply {
-                addHandler(object : Handler() {
-                    override fun publish(record: LogRecord) {
-                        when (record.level) {
-                            Level.SEVERE -> logger.error(record.message)
-                            Level.WARNING -> logger.warn(record.message)
-                            else -> logger.info(record.message)
-                        }
-                    }
-
-                    override fun flush() {}
-                    override fun close() {}
-                })
-            }
-        )
-
-        val result = analyzer.analyze(
-            sourceFiles = sourceFiles.files.toList(),
-            additionalSourceDirs = emptyList()
-        )
-
-        result.writeToFile(outputFile.get().asFile)
-        if (result.usedIcons.isNotEmpty()) {
-            logger.info("Found ${result.usedIcons.size} used icons in ${result.analyzedFiles} files")
-        } else {
-            logger.warn("No icons found! Check that the target classes are correct: $targetClassList")
+        // Submit work to worker with isolated classloader
+        val workQueue = workerExecutor.classLoaderIsolation { spec ->
+            spec.classpath.from(kotlinCompilerClasspath)
         }
 
-        if (result.errors.isNotEmpty()) {
-            logger.warn("Analysis completed with ${result.errors.size} error(s)")
-            result.errors.forEach { (file, error) ->
-                logger.debug("Error in $file: $error")
-            }
+        workQueue.submit(KotlinAnalysisWorkerAction::class.java) { parameters ->
+            parameters.sourceFiles.from(sourceFiles)
+            parameters.targetClasses.set(targetClasses)
+            parameters.outputFile.set(outputFile)
         }
+
+        // Wait for the worker to complete
+        workQueue.await()
+
+        logger.info("Icon usage analysis completed")
     }
 }
