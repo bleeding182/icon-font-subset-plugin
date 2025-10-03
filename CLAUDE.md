@@ -6,9 +6,10 @@ Guidance for Claude Code (claude.ai/code) when working with this repository.
 
 - `font-subsetting/` - Gradle plugin with HarfBuzz JNI wrapper
   - `font-subsetting-plugin/` - Main plugin implementation
+  - `font-subsetting-runtime/` - Android library for runtime path extraction and animation
   - `src/main/cpp/` - Native C++ code with HarfBuzz integration
   - `src/main/resources/native/` - Pre-built native libraries for all platforms
-- `app/` - Demo Android application using the plugin
+- `app/` - Demo Android application using the plugin and runtime
 
 ## Build Commands
 
@@ -25,6 +26,9 @@ cd font-subsetting/font-subsetting-plugin
 
 # Build demo app
 ./gradlew :app:assembleDebug
+
+# Build runtime library
+./gradlew :font-subsetting:font-subsetting-runtime:assembleDebug
 ```
 
 ## Plugin Architecture
@@ -35,12 +39,28 @@ Three Gradle tasks are registered per Android variant:
 2. **AnalyzeIconUsageTask** - PSI analysis of Kotlin code → Outputs JSON with used icons
 3. **FontSubsettingTask** - HarfBuzz subsetting → Creates optimized font with only used glyphs
 
+## Runtime Library Architecture
+
+The `font-subsetting-runtime` module provides:
+- **FontPathExtractor** - JNI wrapper for extracting vector paths from font glyphs using HarfBuzz
+- **Variable Font Axis Support** - Extract paths at specific axis values (FILL, wght, opsz, etc.)
+- **PathIcon** - Compose component for rendering glyphs as vector paths
+- **AnimatedPathIcon** - Compose component with progressive drawing animation
+- **MorphingPathIcon** - Compose component for morphing between different axis values
+- Native C++ code using HarfBuzz 10.0.1 for path extraction
+- Optimized rendering with path reuse and efficient Canvas updates
+
 ## Configuration
 
 ```kotlin
 // In app/build.gradle.kts
 plugins {
     id("com.davidmedenjak.fontsubsetting") version "local" // Uses included build
+}
+
+dependencies {
+    // Add runtime library for path extraction and animation
+    implementation(project(":font-subsetting:font-subsetting-runtime"))
 }
 
 fontSubsetting {
@@ -66,8 +86,43 @@ fontSubsetting {
 }
 ```
 
+## Runtime Library Usage
+
+```kotlin
+// Extract font paths at runtime
+val pathExtractor = FontPathExtractor.fromResource(context, R.font.my_font)
+val glyphPath = pathExtractor.extractGlyphPath('★'.code)
+
+// Extract at specific variable font axis values
+val outlinePath = pathExtractor.extractGlyphPath('★'.code, mapOf("FILL" to 0f))
+val filledPath = pathExtractor.extractGlyphPath('★'.code, mapOf("FILL" to 1f))
+
+// Render as static Compose icon
+PathIcon(
+    glyphPath = glyphPath,
+    size = 48.dp,
+    tint = Color.Blue
+)
+
+// Render with drawing animation
+AnimatedPathIcon(
+    glyphPath = glyphPath,
+    progress = animationProgress, // 0f to 1f
+    size = 48.dp
+)
+
+// Morph between axis values
+MorphingPathIcon(
+    fromPath = outlinePath,
+    toPath = filledPath,
+    progress = fillProgress, // 0f to 1f
+    size = 48.dp
+)
+```
+
 ## Technical Details
 
+### Plugin
 - **Kotlin Analysis**: Uses `kotlin-compiler-embeddable` for PSI/AST parsing
 - **HarfBuzz**: Version 10.0.1 for subsetting with full flag support
 - **Subsetting Flags**:
@@ -78,6 +133,17 @@ fontSubsetting {
 - **Native Libraries**: Pre-built for Linux x86_64, Windows x86_64, macOS x86_64, macOS ARM64
 - **Generated Code**: Icon constants are `internal` to prevent API leakage
 
+### Runtime Library
+
+- **HarfBuzz**: Version 10.0.1 for path extraction using draw funcs API
+- **Variable Font Axes**: Uses `hb_font_set_variations()` to apply axis values before extraction
+- **JNI**: Native bridge between Kotlin and C++ for path extraction
+- **Path Format**: Normalized coordinates (0-1 range) with advance metrics
+- **Supported Commands**: MOVE_TO, LINE_TO, QUADRATIC_TO, CUBIC_TO, CLOSE
+- **Supported Axes**: Any variable font axis (FILL, wght, wdth, opsz, slnt, GRAD, custom)
+- **Performance**: Path reuse with `rewind()`, zero allocations during animation
+- **Android ABIs**: armeabi-v7a, arm64-v8a, x86, x86_64
+
 ## Development Workflow
 
 The plugin uses Gradle's composite build feature (configured in `settings.gradle.kts`):
@@ -86,7 +152,9 @@ The plugin uses Gradle's composite build feature (configured in `settings.gradle
 
 To develop:
 1. Modify plugin code in `font-subsetting/`
-2. If native code changed: `./font-subsetting/font-subsetting-plugin/build-in-docker.sh`
+2. If native code changed:
+  - Plugin: `./font-subsetting/font-subsetting-plugin/build-in-docker.sh`
+  - Runtime: Native builds happen automatically via CMake during Android build
 3. Test directly: `./gradlew :app:subsetDebugFonts --info`
 
 ## Troubleshooting

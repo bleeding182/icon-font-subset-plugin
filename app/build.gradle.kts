@@ -72,8 +72,8 @@ fontSubsetting {
 }
 
 dependencies {
-    // Font subsetting dependencies - using Maven local versions
-    // Annotations module removed - not needed without KSP processor
+    // Font subsetting runtime library - from included build
+    implementation("com.davidmedenjak.fontsubsetting:font-subsetting-runtime:1.0.0-SNAPSHOT")
     
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

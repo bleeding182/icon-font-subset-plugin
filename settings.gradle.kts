@@ -45,3 +45,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "Font Subsetting"
 include(":app")
+
+// Include runtime library as a separate build
+includeBuild("font-subsetting/font-subsetting-runtime")
