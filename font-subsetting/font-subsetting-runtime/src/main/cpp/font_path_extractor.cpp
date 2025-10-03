@@ -3,6 +3,8 @@
 #include <hb-ot.h>
 #include <android/log.h>
 #include <cmath>
+#include <cstring>
+#include <cstdlib>
 
 #define LOG_TAG "FontPathExtractor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -34,9 +36,54 @@ namespace fontsubsetting {
 
 // Context for path drawing callbacks
     struct PathDrawContext {
-        std::vector<PathCommand> *commands;
+        PathCommandArray *commands;
         float scale;
     };
+
+// PathCommandArray implementation
+    PathCommandArray::PathCommandArray() : data(nullptr), size(0), capacity(0) {}
+
+    PathCommandArray::~PathCommandArray() {
+        if (data) {
+            free(data);
+            data = nullptr;
+    }
+    size = 0;
+    capacity = 0;
+}
+
+    void PathCommandArray::reserve(size_t new_capacity) {
+        if (new_capacity <= capacity) return;
+
+        PathCommand *new_data = (PathCommand *) realloc(data, new_capacity * sizeof(PathCommand));
+        if (!new_data) {
+            LOGE("Failed to allocate memory for path commands");
+            return;
+    }
+    data = new_data;
+    capacity = new_capacity;
+}
+
+    void PathCommandArray::push_back(const PathCommand &cmd) {
+        if (size >= capacity) {
+            size_t new_capacity = capacity == 0 ? 8 : capacity * 2;
+            reserve(new_capacity);
+        }
+        if (size < capacity) {
+            data[size++] = cmd;
+        }
+    }
+
+    void PathCommandArray::clear() {
+        size = 0;
+    }
+
+// GlyphPath implementation
+    GlyphPath::GlyphPath()
+            : advanceWidth(0), advanceHeight(0), unitsPerEm(0),
+              minX(0), minY(0), maxX(0), maxY(0) {}
+
+    GlyphPath::~GlyphPath() {}
 
 // HarfBuzz draw callbacks
     static void move_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
@@ -106,15 +153,15 @@ namespace fontsubsetting {
     }
 
     GlyphPath extractGlyphPath(const void *fontData, size_t fontDataSize, unsigned int codepoint) {
-        std::map<std::string, float> emptyVariations;
-        return extractGlyphPathWithVariations(fontData, fontDataSize, codepoint, emptyVariations);
+        return extractGlyphPathWithVariations(fontData, fontDataSize, codepoint, nullptr, 0);
     }
 
     GlyphPath extractGlyphPathWithVariations(
             const void *fontData,
             size_t fontDataSize,
             unsigned int codepoint,
-            const std::map<std::string, float> &variations
+            const Variation *variations,
+            size_t variationCount
     ) {
         GlyphPath result;
 
@@ -162,45 +209,47 @@ namespace fontsubsetting {
         HBFontDeleter font_deleter;
 
         // Apply variable font variations if any
-        if (!variations.empty()) {
-            std::vector<hb_variation_t> hb_variations;
-            hb_variations.reserve(variations.size());
+        if (variationCount > 0 && variations) {
+            // Stack allocate for reasonable number of variations (usually 1-3)
+            hb_variation_t hb_variations[16];
+            size_t actual_count = variationCount > 16 ? 16 : variationCount;
 
-            for (const auto &[tag_str, value]: variations) {
+            for (size_t i = 0; i < actual_count; i++) {
                 hb_variation_t var;
+                const char *tag_str = variations[i].tag;
                 // Convert tag string to HarfBuzz tag (4-byte code)
                 var.tag = HB_TAG(
-                        tag_str.length() > 0 ? tag_str[0] : ' ',
-                        tag_str.length() > 1 ? tag_str[1] : ' ',
-                        tag_str.length() > 2 ? tag_str[2] : ' ',
-                        tag_str.length() > 3 ? tag_str[3] : ' '
+                        tag_str[0] ? tag_str[0] : ' ',
+                        tag_str[1] ? tag_str[1] : ' ',
+                        tag_str[2] ? tag_str[2] : ' ',
+                        tag_str[3] ? tag_str[3] : ' '
                 );
-                var.value = value;
-                hb_variations.push_back(var);
+                var.value = variations[i].value;
+                hb_variations[i] = var;
 
-                LOGD("Applying variation: %s = %.2f", tag_str.c_str(), value);
+                LOGD("Applying variation: %s = %.2f", tag_str, variations[i].value);
+            }
+
+            hb_font_set_variations(font, hb_variations, actual_count);
         }
 
-        hb_font_set_variations(font, hb_variations.data(), hb_variations.size());
-    }
+        // Get glyph ID from codepoint
+        hb_codepoint_t glyph_id;
+        if (!hb_font_get_nominal_glyph(font, codepoint, &glyph_id)) {
+            LOGD("Glyph not found for codepoint U+%04X", codepoint);
+            font_deleter(font);
+            face_deleter(face);
+            return result;
+        }
 
-    // Get glyph ID from codepoint
-    hb_codepoint_t glyph_id;
-    if (!hb_font_get_nominal_glyph(font, codepoint, &glyph_id)) {
-        LOGD("Glyph not found for codepoint U+%04X", codepoint);
-        font_deleter(font);
-        face_deleter(face);
-        return result;
-    }
+        // Get glyph advance metrics
+        hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
+        hb_position_t advance_height = hb_font_get_glyph_v_advance(font, glyph_id);
 
-    // Get glyph advance metrics
-    hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
-    hb_position_t advance_height = hb_font_get_glyph_v_advance(font, glyph_id);
-
-    // Scale to normalized coordinates (0-1 range based on upem)
-    float scale = 1.0f / static_cast<float>(upem);
-    result.advanceWidth = static_cast<float>(advance_width) * scale;
-    result.advanceHeight = static_cast<float>(advance_height) * scale;
+        // Scale to normalized coordinates (0-1 range based on upem)
+        float scale = 1.0f / static_cast<float>(upem);
+        result.advanceWidth = static_cast<float>(advance_width) * scale;
+        result.advanceHeight = static_cast<float>(advance_height) * scale;
 
         // Get glyph extents (bounding box)
         hb_glyph_extents_t extents;
@@ -222,38 +271,38 @@ namespace fontsubsetting {
         }
 
         // Create draw funcs
-    hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
-    if (!draw_funcs) {
-        LOGE("Failed to create draw funcs");
+        hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
+        if (!draw_funcs) {
+            LOGE("Failed to create draw funcs");
+            font_deleter(font);
+            face_deleter(face);
+            return result;
+        }
+
+        // Set callbacks
+        hb_draw_funcs_set_move_to_func(draw_funcs, move_to_func, nullptr, nullptr);
+        hb_draw_funcs_set_line_to_func(draw_funcs, line_to_func, nullptr, nullptr);
+        hb_draw_funcs_set_quadratic_to_func(draw_funcs, quadratic_to_func, nullptr, nullptr);
+        hb_draw_funcs_set_cubic_to_func(draw_funcs, cubic_to_func, nullptr, nullptr);
+        hb_draw_funcs_set_close_path_func(draw_funcs, close_path_func, nullptr, nullptr);
+
+        // Prepare context for drawing
+        PathDrawContext ctx;
+        ctx.commands = &result.commands;
+        ctx.scale = scale;
+
+        // Extract glyph outline
+        hb_font_get_glyph_shape(font, glyph_id, draw_funcs, &ctx);
+
+        // Clean up
+        hb_draw_funcs_destroy(draw_funcs);
         font_deleter(font);
         face_deleter(face);
+
+        LOGD("Extracted %zu path commands for codepoint U+%04X (glyph %u) with %zu variations",
+             result.commands.size, codepoint, glyph_id, variationCount);
+
         return result;
     }
-
-    // Set callbacks
-    hb_draw_funcs_set_move_to_func(draw_funcs, move_to_func, nullptr, nullptr);
-    hb_draw_funcs_set_line_to_func(draw_funcs, line_to_func, nullptr, nullptr);
-    hb_draw_funcs_set_quadratic_to_func(draw_funcs, quadratic_to_func, nullptr, nullptr);
-    hb_draw_funcs_set_cubic_to_func(draw_funcs, cubic_to_func, nullptr, nullptr);
-    hb_draw_funcs_set_close_path_func(draw_funcs, close_path_func, nullptr, nullptr);
-
-    // Prepare context for drawing
-    PathDrawContext ctx;
-    ctx.commands = &result.commands;
-    ctx.scale = scale;
-
-    // Extract glyph outline
-    hb_font_get_glyph_shape(font, glyph_id, draw_funcs, &ctx);
-
-    // Clean up
-    hb_draw_funcs_destroy(draw_funcs);
-    font_deleter(font);
-    face_deleter(face);
-
-    LOGD("Extracted %zu path commands for codepoint U+%04X (glyph %u) with %zu variations",
-         result.commands.size(), codepoint, glyph_id, variations.size());
-
-    return result;
-}
 
 } // namespace fontsubsetting

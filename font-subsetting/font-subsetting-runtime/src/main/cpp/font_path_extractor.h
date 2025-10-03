@@ -1,9 +1,7 @@
 #ifndef FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 #define FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 
-#include <vector>
-#include <string>
-#include <map>
+#include <stddef.h>
 
 namespace fontsubsetting {
 
@@ -22,13 +20,42 @@ namespace fontsubsetting {
         float x3, y3;    // Third point (for CUBIC_TO)
     };
 
+    // Simple dynamic array for path commands (replaces std::vector)
+    struct PathCommandArray {
+        PathCommand *data;
+        size_t size;
+        size_t capacity;
+
+        PathCommandArray();
+
+        ~PathCommandArray();
+
+        void push_back(const PathCommand &cmd);
+
+        void clear();
+
+        bool empty() const { return size == 0; }
+
+    private:
+        void reserve(size_t new_capacity);
+    };
+
+    // Simple key-value pair for variations (replaces std::map)
+    struct Variation {
+        char tag[5];  // 4 chars + null terminator
+        float value;
+    };
+
     struct GlyphPath {
-        std::vector <PathCommand> commands;
+        PathCommandArray commands;
         float advanceWidth;
         float advanceHeight;
         int unitsPerEm;
         float minX, minY, maxX, maxY;  // Bounding box
 
+        GlyphPath();
+
+        ~GlyphPath();
         bool isEmpty() const { return commands.empty(); }
     };
 
@@ -48,14 +75,16 @@ namespace fontsubsetting {
  * @param fontData The font file data
  * @param fontDataSize Size of font data in bytes
  * @param codepoint Unicode codepoint of the glyph
- * @param variations Map of axis tag (e.g., "wght", "FILL") to value
+ * @param variations Array of variation key-value pairs
+ * @param variationCount Number of variations
  * @return GlyphPath containing the path commands, or empty if failed
  */
     GlyphPath extractGlyphPathWithVariations(
             const void *fontData,
             size_t fontDataSize,
             unsigned int codepoint,
-            const std::map<std::string, float> &variations
+            const Variation *variations,
+            size_t variationCount
     );
 
 } // namespace fontsubsetting

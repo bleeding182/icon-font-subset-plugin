@@ -1,5 +1,6 @@
 #include <jni.h>
 #include <android/log.h>
+#include <cstdlib>
 #include "font_path_extractor.h"
 
 #define LOG_TAG "FontPathJNI"
@@ -46,7 +47,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     // Calculate result array size
     // Format: [numCommands, advanceWidth, advanceHeight, unitsPerEm, minX, minY, maxX, maxY, commands...]
     // Each command: [type, x1, y1, x2, y2, x3, y3] (some values unused based on type)
-    size_t commandFloats = glyphPath.commands.size() * 7; // type + 6 floats per command
+    size_t commandFloats = glyphPath.commands.size * 7; // type + 6 floats per command
     size_t totalSize = 8 + commandFloats; // header (8 values) + commands
 
     jfloatArray result = env->NewFloatArray(static_cast<jsize>(totalSize));
@@ -55,32 +56,38 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
         return nullptr;
     }
 
-    // Fill result array
-    std::vector<float> data;
-    data.reserve(totalSize);
-
-    // Header
-    data.push_back(static_cast<float>(glyphPath.commands.size()));
-    data.push_back(glyphPath.advanceWidth);
-    data.push_back(glyphPath.advanceHeight);
-    data.push_back(static_cast<float>(glyphPath.unitsPerEm));
-    data.push_back(glyphPath.minX);
-    data.push_back(glyphPath.minY);
-    data.push_back(glyphPath.maxX);
-    data.push_back(glyphPath.maxY);
-
-    // Commands
-    for (const auto &cmd: glyphPath.commands) {
-        data.push_back(static_cast<float>(cmd.type));
-        data.push_back(cmd.x1);
-        data.push_back(cmd.y1);
-        data.push_back(cmd.x2);
-        data.push_back(cmd.y2);
-        data.push_back(cmd.x3);
-        data.push_back(cmd.y3);
+    // Fill result array - use stack allocation for header, heap for full data
+    float *data = (float *) malloc(totalSize * sizeof(float));
+    if (!data) {
+        LOGE("Failed to allocate data buffer");
+        return nullptr;
     }
 
-    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(data.size()), data.data());
+    size_t offset = 0;
+    // Header
+    data[offset++] = static_cast<float>(glyphPath.commands.size);
+    data[offset++] = glyphPath.advanceWidth;
+    data[offset++] = glyphPath.advanceHeight;
+    data[offset++] = static_cast<float>(glyphPath.unitsPerEm);
+    data[offset++] = glyphPath.minX;
+    data[offset++] = glyphPath.minY;
+    data[offset++] = glyphPath.maxX;
+    data[offset++] = glyphPath.maxY;
+
+    // Commands
+    for (size_t i = 0; i < glyphPath.commands.size; i++) {
+        const auto &cmd = glyphPath.commands.data[i];
+        data[offset++] = static_cast<float>(cmd.type);
+        data[offset++] = cmd.x1;
+        data[offset++] = cmd.y1;
+        data[offset++] = cmd.x2;
+        data[offset++] = cmd.y2;
+        data[offset++] = cmd.x3;
+        data[offset++] = cmd.y3;
+    }
+
+    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(totalSize), data);
+    free(data);
 
     return result;
 }
@@ -109,22 +116,30 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
         return nullptr;
     }
 
-    // Parse variations
-    std::map<std::string, float> variations;
+    // Parse variations into simple array
+    fontsubsetting::Variation variations[16];  // Stack allocate, max 16 variations
+    size_t variationCount = 0;
+
     if (variationTags && variationValues) {
         jsize tagCount = env->GetArrayLength(variationTags);
         jsize valueCount = env->GetArrayLength(variationValues);
 
-        if (tagCount == valueCount) {
+        if (tagCount == valueCount && tagCount > 0) {
             jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
+            variationCount = tagCount > 16 ? 16 : tagCount;  // Limit to 16
 
-            for (jsize i = 0; i < tagCount; i++) {
+            for (size_t i = 0; i < variationCount; i++) {
                 auto tagObj = (jstring) env->GetObjectArrayElement(variationTags, i);
                 const char *tagChars = env->GetStringUTFChars(tagObj, nullptr);
-                std::string tag(tagChars);
-                float value = values[i];
 
-                variations[tag] = value;
+                // Copy tag (max 4 chars)
+                size_t len = 0;
+                while (tagChars[len] && len < 4) {
+                    variations[i].tag[len] = tagChars[len];
+                    len++;
+                }
+                variations[i].tag[len] = '\0';  // Null terminate
+                variations[i].value = values[i];
 
                 env->ReleaseStringUTFChars(tagObj, tagChars);
                 env->DeleteLocalRef(tagObj);
@@ -139,7 +154,8 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
             fontBytes,
             static_cast<size_t>(fontDataSize),
             static_cast<unsigned int>(codepoint),
-            variations
+            variations,
+            variationCount
     );
 
     // Release font data
@@ -150,7 +166,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     }
 
     // Calculate result array size
-    size_t commandFloats = glyphPath.commands.size() * 7;
+    size_t commandFloats = glyphPath.commands.size * 7;
     size_t totalSize = 8 + commandFloats;
 
     jfloatArray result = env->NewFloatArray(static_cast<jsize>(totalSize));
@@ -160,31 +176,37 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     }
 
     // Fill result array
-    std::vector<float> data;
-    data.reserve(totalSize);
-
-    // Header
-    data.push_back(static_cast<float>(glyphPath.commands.size()));
-    data.push_back(glyphPath.advanceWidth);
-    data.push_back(glyphPath.advanceHeight);
-    data.push_back(static_cast<float>(glyphPath.unitsPerEm));
-    data.push_back(glyphPath.minX);
-    data.push_back(glyphPath.minY);
-    data.push_back(glyphPath.maxX);
-    data.push_back(glyphPath.maxY);
-
-    // Commands
-    for (const auto &cmd: glyphPath.commands) {
-        data.push_back(static_cast<float>(cmd.type));
-        data.push_back(cmd.x1);
-        data.push_back(cmd.y1);
-        data.push_back(cmd.x2);
-        data.push_back(cmd.y2);
-        data.push_back(cmd.x3);
-        data.push_back(cmd.y3);
+    float *data = (float *) malloc(totalSize * sizeof(float));
+    if (!data) {
+        LOGE("Failed to allocate data buffer");
+        return nullptr;
     }
 
-    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(data.size()), data.data());
+    size_t offset = 0;
+    // Header
+    data[offset++] = static_cast<float>(glyphPath.commands.size);
+    data[offset++] = glyphPath.advanceWidth;
+    data[offset++] = glyphPath.advanceHeight;
+    data[offset++] = static_cast<float>(glyphPath.unitsPerEm);
+    data[offset++] = glyphPath.minX;
+    data[offset++] = glyphPath.minY;
+    data[offset++] = glyphPath.maxX;
+    data[offset++] = glyphPath.maxY;
+
+    // Commands
+    for (size_t i = 0; i < glyphPath.commands.size; i++) {
+        const auto &cmd = glyphPath.commands.data[i];
+        data[offset++] = static_cast<float>(cmd.type);
+        data[offset++] = cmd.x1;
+        data[offset++] = cmd.y1;
+        data[offset++] = cmd.x2;
+        data[offset++] = cmd.y2;
+        data[offset++] = cmd.x3;
+        data[offset++] = cmd.y3;
+    }
+
+    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(totalSize), data);
+    free(data);
 
     return result;
 }
