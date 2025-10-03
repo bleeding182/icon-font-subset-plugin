@@ -38,6 +38,8 @@ add_compile_definitions(
         HB_NO_ATEXIT             # Don't register atexit handlers
         HB_NO_SETLOCALE          # Don't use setlocale
         HB_OPTIMIZE_SIZE         # Enable internal size optimizations
+        HB_NO_UCD                # Don't include Unicode Character Database (~15-20KB saved!)
+        HB_NO_UNICODE_FUNCS      # We don't use Unicode functions for shaping
 )
 
 # Add LTO flag only for Release builds
