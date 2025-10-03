@@ -35,6 +35,9 @@ add_compile_definitions(
         HB_NO_CFF                # We don't need CFF extents (saves ~10KB)
         HB_NO_GETENV             # Don't check environment variables
         HB_NO_ERRNO              # Don't use errno
+        HB_NO_ATEXIT             # Don't register atexit handlers
+        HB_NO_SETLOCALE          # Don't use setlocale
+        HB_OPTIMIZE_SIZE         # Enable internal size optimizations
 )
 
 # Add LTO flag only for Release builds
@@ -91,6 +94,9 @@ target_link_options(fontsubsetting-runtime PRIVATE
         -Wl,--strip-all
         -Wl,--exclude-libs,ALL
         -Wl,-z,max-page-size=16384  # 16KB page alignment for Android 15+
+        -Wl,--icf=all                # Identical Code Folding - merge identical functions
+        -Wl,--hash-style=gnu         # Use GNU hash style (smaller than both)
+        -Wl,-O3                      # Linker optimization level
 )
 
 target_link_libraries(fontsubsetting-runtime
