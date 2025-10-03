@@ -65,9 +65,12 @@ android {
         }
 
         debug {
+            // Use Release native library even in debug builds for optimal size
+            // This gives us the ~104KB optimized library during development
             externalNativeBuild {
                 cmake {
-                    arguments("-DCMAKE_BUILD_TYPE=Debug")
+                    cppFlags += listOf("-Os", "-flto=thin", "-DNDEBUG")
+                    arguments("-DCMAKE_BUILD_TYPE=Release")
                 }
             }
         }

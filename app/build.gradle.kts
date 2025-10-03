@@ -28,6 +28,10 @@ android {
                 "proguard-rules.pro"
             )
         }
+
+        debug {
+            // No special configuration needed - runtime library now uses Release CMake for both variants
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

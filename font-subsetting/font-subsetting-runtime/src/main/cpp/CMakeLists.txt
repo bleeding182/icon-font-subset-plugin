@@ -7,9 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Enable LTO (Link Time Optimization) only for Release builds
 # Debug builds skip LTO to avoid linker issues and speed up development
+# NOTE: CMAKE_INTERPROCEDURAL_OPTIMIZATION disabled due to Windows/MinGW gold linker conflicts
+# Using manual -flto=thin instead
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-    message(STATUS "LTO enabled for Release build")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    message(STATUS "Using manual -flto=thin for Release build (CMAKE_INTERPROCEDURAL_OPTIMIZATION disabled due to linker conflicts)")
 else ()
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
     message(STATUS "LTO disabled for Debug build")
