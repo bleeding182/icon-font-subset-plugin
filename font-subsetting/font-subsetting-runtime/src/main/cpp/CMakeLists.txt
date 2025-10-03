@@ -25,6 +25,8 @@ add_compile_options(
         -fvisibility=hidden      # Hide symbols by default (reduces binary size)
         -fno-exceptions          # Disable C++ exceptions (significant size reduction)
         -fno-rtti                # Disable RTTI (reduces size, we don't use dynamic_cast/typeid)
+        -fno-unwind-tables       # Don't emit unwind tables (saves ~12-14KB since we disabled exceptions)
+        -fno-asynchronous-unwind-tables  # Don't emit async unwind tables
 )
 
 # HarfBuzz size optimization flags
@@ -42,6 +44,7 @@ add_compile_definitions(
         HB_OPTIMIZE_SIZE         # Enable internal size optimizations
         HB_NO_UCD                # Don't include Unicode Character Database (~15-20KB saved!)
         HB_NO_UNICODE_FUNCS      # We don't use Unicode functions for shaping
+        HB_NO_GLYPH_NAMES        # Don't include Adobe Glyph List (~174 glyph names, saves ~3-5KB)
 )
 
 # Add LTO flag only for Release builds
