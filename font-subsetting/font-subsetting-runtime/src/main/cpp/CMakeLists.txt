@@ -32,6 +32,9 @@ add_compile_definitions(
         HB_NO_BUFFER_MESSAGE     # We don't use buffer messages
         HB_NO_PAINT              # We don't use COLR/CPAL paint API
         HB_NO_SUBSET_LAYOUT      # We're not subsetting, just extracting paths
+        HB_NO_CFF                # We don't need CFF extents (saves ~10KB)
+        HB_NO_GETENV             # Don't check environment variables
+        HB_NO_ERRNO              # Don't use errno
 )
 
 # Add LTO flag only for Release builds
@@ -41,7 +44,7 @@ endif ()
 
 # Find Android libraries
 find_library(log-lib log)
-find_library(android-lib android)
+# libandroid not needed - we only use logging
 
 # HarfBuzz configuration - minimal build for path extraction only
 include(FetchContent)
@@ -92,9 +95,12 @@ target_link_options(fontsubsetting-runtime PRIVATE
 
 target_link_libraries(fontsubsetting-runtime
         harfbuzz
-        ${log-lib}
-        ${android-lib}
 )
+
+# Only link log library for Debug builds (Release has logging disabled)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_link_libraries(fontsubsetting-runtime ${log-lib})
+endif ()
 
 # Additional stripping in release builds
 if (CMAKE_BUILD_TYPE STREQUAL "Release")

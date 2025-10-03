@@ -53,7 +53,7 @@ android {
 
             externalNativeBuild {
                 cmake {
-                    cppFlags += listOf("-Os", "-flto=thin")
+                    cppFlags += listOf("-Os", "-flto=thin", "-DNDEBUG")
                     arguments("-DCMAKE_BUILD_TYPE=Release")
                 }
             }

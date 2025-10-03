@@ -7,9 +7,17 @@
 #include <cstdlib>
 
 #define LOG_TAG "FontPathExtractor"
+
+// Disable logging in release builds to save binary size
+#ifdef NDEBUG
+#define LOGI(...)
+#define LOGE(...)
+#define LOGD(...)
+#else
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#endif
 
 namespace fontsubsetting {
 

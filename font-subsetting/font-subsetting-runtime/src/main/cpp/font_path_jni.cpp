@@ -4,7 +4,13 @@
 #include "font_path_extractor.h"
 
 #define LOG_TAG "FontPathJNI"
+
+// Disable logging in release builds to save binary size
+#ifdef NDEBUG
+#define LOGE(...)
+#else
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#endif
 
 extern "C" {
 
