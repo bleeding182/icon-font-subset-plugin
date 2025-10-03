@@ -37,6 +37,8 @@ android {
         }
 
         ndk {
+            // For production: Consider reducing to only arm64-v8a for smaller APK size
+            // Most modern devices (95%+) support arm64. This would reduce total library size by ~75%
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
         }
     }

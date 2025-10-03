@@ -279,6 +279,118 @@ Extracted paths include:
 - **Lazy Extraction**: Paths extracted only when needed
 - **Compose `remember`**: Prevents re-extraction on recomposition
 
+## Binary Size Optimization
+
+The runtime library is heavily optimized for minimal binary size while maintaining full
+functionality:
+
+### Applied Optimizations
+
+#### Compiler Optimizations
+
+- **`-Os`**: Optimize for size rather than speed
+- **`-flto=thin`**: Thin Link-Time Optimization for Release builds
+- **`-ffunction-sections`** / **`-fdata-sections`**: Each function/data in separate section
+- **`-fno-exceptions`**: Disable C++ exceptions (not needed)
+- **`-fno-rtti`**: Disable Run-Time Type Information (not needed)
+- **`-fvisibility=hidden`**: Hide symbols by default
+
+#### Linker Optimizations
+
+- **`--gc-sections`**: Remove unused code sections
+- **`--as-needed`**: Only link needed libraries
+- **`--strip-all`**: Strip all symbols
+- **`--exclude-libs,ALL`**: Hide symbols from static libraries
+- **`-z,max-page-size=16384`**: 16KB page alignment for Android 15+
+
+#### HarfBuzz Feature Reduction
+
+We only use HarfBuzz for path extraction, not text shaping. Disabled features:
+
+- **HB_NO_FALLBACK_SHAPE**: Removes unused fallback shaper
+- **HB_NO_BUFFER_SERIALIZE**: No buffer serialization
+- **HB_NO_BUFFER_MESSAGE**: No buffer messages
+- **HB_NO_PAINT**: No COLR/CPAL paint API
+- **HB_NO_SUBSET_LAYOUT**: We don't subset fonts
+- Disabled: FreeType, Glib, ICU, Graphite2, CoreText, Uniscribe, DirectWrite, GDI
+
+**Note**: `HB_MINI` and `HB_LEAN` are too aggressive - they disable the drawing API (`hb_draw_*`)
+that we require for path extraction.
+
+### Current Size
+
+- **~472 KB per architecture** (stripped, optimized)
+- **~1.8 MB total** for 4 architectures (armeabi-v7a, arm64-v8a, x86, x86_64)
+
+### Further Size Reduction Options
+
+#### 1. Reduce Architecture Support (Recommended for Production)
+
+```kotlin
+ndk {
+    // Only arm64-v8a covers 95%+ of modern Android devices
+    abiFilters += listOf("arm64-v8a")
+}
+```
+
+**Savings**: ~75% reduction in total library size (~450 KB total instead of 1.8 MB)
+
+#### 2. Remove Variable Font Support (if not needed)
+
+If you don't need variable font axis variations (e.g., FILL morphing):
+
+```cmake
+add_compile_definitions(HB_NO_VAR)
+```
+
+**Savings**: ~20-30 KB per architecture
+
+#### 3. Use `-Oz` on Clang (more aggressive size optimization)
+
+```cmake
+add_compile_options(-Oz)  // Instead of -Os
+```
+
+**Savings**: ~5-10% additional reduction, may impact performance
+
+#### 4. Strip Debug Info in AGP
+
+```kotlin
+packagingOptions {
+    jniLibs {
+        keepDebugSymbols += listOf()  // Strip debug symbols
+    }
+}
+```
+
+**Savings**: Already applied via `--strip-all`
+
+### Size Comparison
+
+| Configuration     | Size per arch | Total (4 archs) | Coverage                         |
+|-------------------|---------------|-----------------|----------------------------------|
+| Current           | ~472 KB       | ~1.8 MB         | All devices                      |
+| arm64-only        | ~472 KB       | ~472 KB         | 95%+ devices                     |
+| arm64 + HB_NO_VAR | ~450 KB       | ~450 KB         | 95%+ devices (no variable fonts) |
+
+### What We Cannot Remove
+
+- **HarfBuzz draw API**: Required for path extraction
+- **Variable font support**: Used for FILL axis morphing in demos
+- **OpenType support**: Core functionality
+- **Android logging**: Minimal overhead, useful for debugging
+
+### Performance vs Size Trade-offs
+
+The current configuration prioritizes **size** with acceptable performance:
+
+- Path extraction: < 1ms per glyph
+- Memory allocation: Minimal (RAII, move semantics)
+- No runtime overhead from disabled features
+
+**Recommendation**: For production apps, use **arm64-v8a only** unless you have specific
+requirements for older devices or emulators.
+
 ## Native Dependencies
 
 The library includes prebuilt native libraries for:
@@ -308,3 +420,4 @@ See the demo app for complete examples of:
 ## License
 
 MIT License - see [LICENSE](../../LICENSE) file.
+

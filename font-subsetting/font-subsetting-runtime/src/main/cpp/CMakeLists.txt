@@ -25,6 +25,15 @@ add_compile_options(
         -fno-rtti                # Disable RTTI (reduces size, we don't use dynamic_cast/typeid)
 )
 
+# HarfBuzz size optimization flags
+add_compile_definitions(
+        HB_NO_FALLBACK_SHAPE     # Remove unused fallback shaper
+        HB_NO_BUFFER_SERIALIZE   # We don't serialize buffers
+        HB_NO_BUFFER_MESSAGE     # We don't use buffer messages
+        HB_NO_PAINT              # We don't use COLR/CPAL paint API
+        HB_NO_SUBSET_LAYOUT      # We're not subsetting, just extracting paths
+)
+
 # Add LTO flag only for Release builds
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-flto=thin)
