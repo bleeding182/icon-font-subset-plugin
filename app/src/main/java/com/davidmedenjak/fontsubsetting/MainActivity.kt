@@ -60,6 +60,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.davidmedenjak.fontsubsetting.runtime.AxisTag
 import com.davidmedenjak.fontsubsetting.runtime.FontPathExtractor
 import com.davidmedenjak.fontsubsetting.runtime.Glyph
 import com.davidmedenjak.fontsubsetting.runtime.rememberFontPathExtractor
@@ -346,11 +347,12 @@ fun GlyphIconCard(
     )
 
     // Use LaunchedEffect to update axes when fill or grade change
+    // Now using integer axis tags for zero-allocation performance
     androidx.compose.runtime.LaunchedEffect(fill, grade, glyph) {
         glyph?.updateAxes {
-            put("FILL", fill)
-            put("wght", 400f)
-            put("GRAD", grade)
+            put(AxisTag.FILL, fill)
+            put(AxisTag.WGHT, 400f)
+            put(AxisTag.GRAD, grade)
         }
     }
 

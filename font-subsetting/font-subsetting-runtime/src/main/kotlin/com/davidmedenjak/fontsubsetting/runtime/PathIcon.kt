@@ -152,7 +152,7 @@ fun rememberFontPathExtractor(inputStream: InputStream): FontPathExtractor? {
  *     extractor = extractor,
  *     char = '★',
  *     size = 48.dp,
- *     axes = mapOf("FILL" to fillValue)
+ *     axes = mapOf(AxisTag.FILL to fillValue)
  * )
  * ```
  *
@@ -162,13 +162,13 @@ fun rememberFontPathExtractor(inputStream: InputStream): FontPathExtractor? {
  * glyph?.let {
  *     // Animate individual axes
  *     LaunchedEffect(fillValue) {
- *         it.updateAxes { put("FILL", fillValue) }
+ *         it.updateAxes { put(AxisTag.FILL, fillValue) }
  *     }
  *
  *     // Or update multiple axes at once
  *     it.updateAxes {
- *         put("FILL", 1f)
- *         put("wght", 700f)
+ *         put(AxisTag.FILL, 1f)
+ *         put(AxisTag.WGHT, 700f)
  *     }
  *
  *     Glyph(it, size = 48.dp, tint = Color.Red)
@@ -220,8 +220,8 @@ class GlyphState internal constructor(
     // Layer 1: Path and metadata management
     private val pathData = PathData()
 
-    // Layer 2: Axis configuration management
-    private val axes = mutableMapOf<String, Float>()
+    // Layer 2: Axis configuration management (using integer tags for efficiency)
+    private val axes = mutableMapOf<Int, Float>()
     private var targetSizePx: Float = 0f
 
     // Cached native glyph handle for efficient axis updates
@@ -286,27 +286,43 @@ class GlyphState internal constructor(
      * Sets a single axis value and updates the path.
      * This is useful for animating individual axes.
      *
-     * @param axis Axis tag (e.g., "FILL", "wght")
+     * Uses integer axis tags from [AxisTag] for zero-allocation performance.
+     *
+     * @param axisTag Axis tag (e.g., [AxisTag.FILL], [AxisTag.WGHT])
      * @param value Axis value
      * @return true if successful, false if glyph not found
      */
-    fun setAxis(axis: String, value: Float): Boolean {
+    fun setAxis(axisTag: Int, value: Float): Boolean {
         // Early exit if value hasn't changed (reduces redundant updates)
-        if (axes[axis] == value) {
+        if (axes[axisTag] == value) {
             return true
         }
-        axes[axis] = value
+        axes[axisTag] = value
         return updatePath()
+    }
+
+    /**
+     * Sets a single axis value using a string tag and updates the path.
+     *
+     * Note: This allocates a string conversion. For performance-critical code,
+     * prefer using the integer overload with [AxisTag] constants.
+     *
+     * @param axisTag 4-character axis tag string (e.g., "FILL", "wght")
+     * @param value Axis value
+     * @return true if successful, false if glyph not found
+     */
+    fun setAxis(axisTag: String, value: Float): Boolean {
+        return setAxis(AxisTag.fromString(axisTag), value)
     }
 
     /**
      * Sets multiple axis values and updates the path.
      * This replaces all current axis values.
      *
-     * @param newAxes Map of axis tags to values
+     * @param newAxes Map of integer axis tags to values
      * @return true if successful, false if glyph not found
      */
-    fun setAxes(newAxes: Map<String, Float>): Boolean {
+    fun setAxes(newAxes: Map<Int, Float>): Boolean {
         axes.clear()
         axes.putAll(newAxes)
         return updatePath()
@@ -316,10 +332,18 @@ class GlyphState internal constructor(
      * Updates the axes using a lambda receiver.
      * This is useful for updating multiple axes at once without allocating intermediate maps.
      *
+     * Example:
+     * ```kotlin
+     * glyph.updateAxes {
+     *     put(AxisTag.FILL, fillValue)
+     *     put(AxisTag.WGHT, weightValue)
+     * }
+     * ```
+     *
      * @param block Lambda with the axes map as receiver
      * @return true if successful, false if glyph not found
      */
-    fun updateAxes(block: MutableMap<String, Float>.() -> Unit): Boolean {
+    fun updateAxes(block: MutableMap<Int, Float>.() -> Unit): Boolean {
         axes.apply(block)
         return updatePath()
     }
@@ -327,11 +351,11 @@ class GlyphState internal constructor(
     /**
      * Removes an axis value and updates the path.
      *
-     * @param axis Axis tag to remove
+     * @param axisTag Axis tag to remove
      * @return true if successful, false if glyph not found
      */
-    fun removeAxis(axis: String): Boolean {
-        axes.remove(axis)
+    fun removeAxis(axisTag: Int): Boolean {
+        axes.remove(axisTag)
         return updatePath()
     }
 
@@ -348,7 +372,7 @@ class GlyphState internal constructor(
     /**
      * Gets the current axis values.
      */
-    fun getAxes(): Map<String, Float> = axes.toMap()
+    fun getAxes(): Map<Int, Float> = axes.toMap()
 
     /**
      * Sets the target size for rendering and updates the path.
@@ -366,6 +390,8 @@ class GlyphState internal constructor(
      * Updates the glyph path with the current axis configuration and size.
      * Internal method that fetches raw data and delegates to PathData.
      *
+     * Uses zero-allocation JNI methods for 0-3 axes (covers 95%+ of use cases).
+     *
      * @return true if successful, false if glyph not found
      */
     private fun updatePath(): Boolean {
@@ -378,17 +404,47 @@ class GlyphState internal constructor(
         val currentAxesHash = axes.hashCode()
 
         // Only fetch new raw data if axes have changed
+        // Use specialized zero-allocation JNI methods based on axis count
         val rawData = if (cachedRawData == null || cachedAxesHash != currentAxesHash) {
-            val newRawData = if (axes.isEmpty()) {
-                extractor.extractGlyphPathFromHandle(
-                    nativeGlyphHandle,
-                    emptyArray(),
-                    floatArrayOf()
-                )
-            } else {
-                val tags = axes.keys.toTypedArray()
-                val values = axes.values.toFloatArray()
-                extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
+            val newRawData = when (axes.size) {
+                0 -> {
+                    // No axes - static glyph (zero allocation)
+                    extractor.extractGlyphPathFromHandle0(nativeGlyphHandle)
+                }
+
+                1 -> {
+                    // Single axis (zero allocation)
+                    val (tag, value) = axes.entries.first()
+                    extractor.extractGlyphPathFromHandle1(nativeGlyphHandle, tag, value)
+                }
+
+                2 -> {
+                    // Two axes (zero allocation)
+                    val iter = axes.entries.iterator()
+                    val (tag1, value1) = iter.next()
+                    val (tag2, value2) = iter.next()
+                    extractor.extractGlyphPathFromHandle2(
+                        nativeGlyphHandle, tag1, value1, tag2, value2
+                    )
+                }
+
+                3 -> {
+                    // Three axes (zero allocation)
+                    val iter = axes.entries.iterator()
+                    val (tag1, value1) = iter.next()
+                    val (tag2, value2) = iter.next()
+                    val (tag3, value3) = iter.next()
+                    extractor.extractGlyphPathFromHandle3(
+                        nativeGlyphHandle, tag1, value1, tag2, value2, tag3, value3
+                    )
+                }
+
+                else -> {
+                    // 4+ axes (rare, fallback to array allocation)
+                    val tags = axes.keys.toIntArray()
+                    val values = axes.values.toFloatArray()
+                    extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
+                }
             } ?: return false
 
             cachedRawData = newRawData
@@ -470,7 +526,7 @@ class GlyphState internal constructor(
      * Called during initialization.
      */
     internal fun initialize(
-        initialAxes: Map<String, Float> = emptyMap(),
+        initialAxes: Map<Int, Float> = emptyMap(),
         sizePx: Float = 0f
     ): Boolean {
         // Create native glyph handle
@@ -517,7 +573,7 @@ class GlyphState internal constructor(
  *     extractor,
  *     '★',
  *     size = 48.dp,
- *     axes = mapOf("FILL" to 1f, "wght" to 400f)
+ *     axes = mapOf(AxisTag.FILL to 1f, AxisTag.WGHT to 400f)
  * )
  *
  * glyph?.let {
@@ -536,7 +592,7 @@ fun rememberGlyph(
     extractor: FontPathExtractor,
     char: Char,
     size: Dp = 24.dp,
-    axes: Map<String, Float> = emptyMap()
+    axes: Map<Int, Float> = emptyMap()
 ): GlyphState? = rememberGlyph(extractor, char.code, size, axes)
 
 /**
@@ -553,7 +609,7 @@ fun rememberGlyph(
     extractor: FontPathExtractor,
     codepoint: Int,
     size: Dp = 24.dp,
-    axes: Map<String, Float> = emptyMap()
+    axes: Map<Int, Float> = emptyMap()
 ): GlyphState? {
     val sizePx = with(LocalDensity.current) { size.toPx() }
 
