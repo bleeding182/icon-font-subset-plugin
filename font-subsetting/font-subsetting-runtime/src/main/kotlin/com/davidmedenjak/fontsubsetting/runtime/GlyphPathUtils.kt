@@ -30,7 +30,7 @@ internal class PathData {
      * The Compose path for this glyph.
      */
     val composePath = Path().apply {
-        fillType = PathFillType.EvenOdd
+        fillType = PathFillType.NonZero
     }
 
     // Glyph metrics
@@ -62,11 +62,22 @@ internal class PathData {
     /**
      * Updates the path with new raw glyph data from native code.
      * Rewinds the existing path and refills it with the new data.
+     * Applies the given transformations during path construction.
      *
      * @param rawData Raw float array from native code containing header + commands
+     * @param scaleX Horizontal scale factor to apply
+     * @param scaleY Vertical scale factor to apply (typically negative to flip Y)
+     * @param translateX Horizontal translation to apply after scaling
+     * @param translateY Vertical translation to apply after scaling
      * @return true if successful, false if data is invalid
      */
-    fun update(rawData: FloatArray): Boolean {
+    fun update(
+        rawData: FloatArray,
+        scaleX: Float = 1f,
+        scaleY: Float = 1f,
+        translateX: Float = 0f,
+        translateY: Float = 0f
+    ): Boolean {
         // Validate minimum size for header
         if (rawData.size < 8) return false
 
@@ -82,8 +93,9 @@ internal class PathData {
 
         // Rewind the existing path for reuse
         composePath.rewind()
+        composePath.fillType = PathFillType.NonZero
 
-        // Fill path directly from raw command data
+        // Fill path directly from raw command data with transformations applied
         // Each command: [type, x1, y1, x2, y2, x3, y3]
         var offset = 8
         for (i in 0 until numCommands) {
@@ -98,10 +110,35 @@ internal class PathData {
             val y3 = rawData[offset + 6]
 
             when (type) {
-                PATH_COMMAND_MOVE_TO -> composePath.moveTo(x1, y1)
-                PATH_COMMAND_LINE_TO -> composePath.lineTo(x1, y1)
-                PATH_COMMAND_QUADRATIC_TO -> composePath.quadraticTo(x1, y1, x2, y2)
-                PATH_COMMAND_CUBIC_TO -> composePath.cubicTo(x1, y1, x2, y2, x3, y3)
+                PATH_COMMAND_MOVE_TO -> {
+                    val tx = x1 * scaleX + translateX
+                    val ty = y1 * scaleY + translateY
+                    composePath.moveTo(tx, ty)
+                }
+
+                PATH_COMMAND_LINE_TO -> {
+                    val tx = x1 * scaleX + translateX
+                    val ty = y1 * scaleY + translateY
+                    composePath.lineTo(tx, ty)
+                }
+
+                PATH_COMMAND_QUADRATIC_TO -> {
+                    val tx1 = x1 * scaleX + translateX
+                    val ty1 = y1 * scaleY + translateY
+                    val tx2 = x2 * scaleX + translateX
+                    val ty2 = y2 * scaleY + translateY
+                    composePath.quadraticTo(tx1, ty1, tx2, ty2)
+                }
+
+                PATH_COMMAND_CUBIC_TO -> {
+                    val tx1 = x1 * scaleX + translateX
+                    val ty1 = y1 * scaleY + translateY
+                    val tx2 = x2 * scaleX + translateX
+                    val ty2 = y2 * scaleY + translateY
+                    val tx3 = x3 * scaleX + translateX
+                    val ty3 = y3 * scaleY + translateY
+                    composePath.cubicTo(tx1, ty1, tx2, ty2, tx3, ty3)
+                }
                 PATH_COMMAND_CLOSE -> composePath.close()
             }
 

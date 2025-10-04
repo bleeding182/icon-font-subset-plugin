@@ -10,13 +10,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawStyle
-import androidx.compose.ui.graphics.drawscope.Fill
-import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -30,11 +28,11 @@ import androidx.compose.ui.unit.dp
  *
  * ### `rememberGlyph()` - Create and cache glyph state
  * Creates a [GlyphState] instance that manages:
- * - A single reusable Compose [Path] (Layer 1: PathData)
- * - Variable font axis configuration (Layer 2: GlyphState)
+ * - A single reusable Compose [Path] with pre-scaled coordinates (Layer 1: PathData)
+ * - Variable font axis configuration and target size (Layer 2: GlyphState)
  *
  * ### `Glyph()` - Render the glyph
- * Renders a [GlyphState] as a vector icon with proper scaling and centering.
+ * Renders a [GlyphState] as a vector icon. The path is already scaled to the target size.
  *
  * ## Basic Usage
  *
@@ -43,8 +41,8 @@ import androidx.compose.ui.unit.dp
  *     FontPathExtractor.fromResource(context, R.font.my_font)
  * }
  *
- * // Static glyph
- * val glyph = rememberGlyph(extractor, '★')
+ * // Static glyph - path is pre-scaled to 48dp
+ * val glyph = rememberGlyph(extractor, '★', size = 48.dp)
  * glyph?.let {
  *     Glyph(it, size = 48.dp, tint = Color.Blue)
  * }
@@ -60,13 +58,14 @@ import androidx.compose.ui.unit.dp
  * val glyph = rememberGlyph(
  *     extractor = extractor,
  *     char = '★',
+ *     size = 48.dp,
  *     axes = mapOf("FILL" to fillValue)
  * )
  * ```
  *
  * ### Option 2: Manipulate GlyphState directly (imperative)
  * ```kotlin
- * val glyph = rememberGlyph(extractor, '★')
+ * val glyph = rememberGlyph(extractor, '★', size = 48.dp)
  * glyph?.let {
  *     // Animate individual axes
  *     LaunchedEffect(fillValue) {
@@ -79,13 +78,6 @@ import androidx.compose.ui.unit.dp
  *         put("wght", 700f)
  *     }
  *
- *     // Or replace all axes (clear + set)
- *     it.updateAxes {
- *         clear()
- *         put("FILL", 0f)
- *         put("wght", 300f)
- *     }
- *
  *     Glyph(it, size = 48.dp, tint = Color.Red)
  * }
  * ```
@@ -95,24 +87,26 @@ import androidx.compose.ui.unit.dp
  * The implementation uses a clean two-layer architecture:
  *
  * **Layer 1: PathData** (internal)
- * - Manages a single Compose Path and glyph metrics
+ * - Manages a single Compose Path with pre-scaled coordinates
  * - Handles path reuse with rewind()
- * - Parses raw native data and fills path directly
+ * - Parses raw native data and applies transformations during path construction
  * - Agnostic to variable font axes
  *
  * **Layer 2: GlyphState** (public)
- * - Manages variable font axis configuration
- * - Provides clean API for axis manipulation
+ * - Manages variable font axis configuration and target size
+ * - Provides clean API for axis manipulation and size updates
+ * - Calculates transformations based on glyph bounds and target size
  * - Delegates path updates to PathData
  * - Handles native code interaction
  *
  * ## Performance Characteristics
  *
  * - **Single Path**: Only one Compose [Path] object per glyph
- * - **No Intermediate Objects**: Direct parsing into path operations
- * - **Efficient Updates**: Uses [Path.rewind()] for axis changes
+ * - **Pre-scaled Coordinates**: Path is built in pixel space, no canvas scaling needed
+ * - **Efficient Updates**: Uses [Path.rewind()] for axis/size changes
  * - **Smart Caching**: [GlyphState] remembered per extractor + codepoint
- * - **Clean Separation**: Independent layers for path and axis management
+ * - **Clean Separation**: Independent layers for path and axis/size management
+ * - **Correct Stroke Widths**: Since path is in pixel space, stroke widths work correctly
  *
  * @see rememberGlyph
  * @see Glyph
@@ -123,7 +117,7 @@ import androidx.compose.ui.unit.dp
  * Layer 2: Glyph State with Axis Management
  *
  * Represents a glyph with a single cached Compose Path and metrics.
- * The path is reused and refilled directly from native code when axis values change.
+ * The path is reused and refilled directly from native code when axis values or size change.
  */
 @Stable
 class GlyphState internal constructor(
@@ -135,6 +129,7 @@ class GlyphState internal constructor(
 
     // Layer 2: Axis configuration management
     private val axes = mutableMapOf<String, Float>()
+    private var targetSizePx: Float = 0f
 
     /**
      * Width of the glyph bounding box
@@ -251,7 +246,19 @@ class GlyphState internal constructor(
     fun getAxes(): Map<String, Float> = axes.toMap()
 
     /**
-     * Updates the glyph path with the current axis configuration.
+     * Sets the target size for rendering and updates the path.
+     * The path will be scaled and transformed to fit this size.
+     *
+     * @param sizePx Target size in pixels
+     * @return true if successful, false if glyph not found
+     */
+    fun setSize(sizePx: Float): Boolean {
+        targetSizePx = sizePx
+        return updatePath()
+    }
+
+    /**
+     * Updates the glyph path with the current axis configuration and size.
      * Internal method that fetches raw data and delegates to PathData.
      *
      * @return true if successful, false if glyph not found
@@ -266,29 +273,78 @@ class GlyphState internal constructor(
             extractor.nativeExtractGlyphPathWithVariationsInternal(codepoint, tags, values)
         } ?: return false
 
-        // Delegate to PathData to update the path
-        return pathData.update(rawData)
+        // Validate minimum size for header
+        if (rawData.size < 8) return false
+
+        // Parse header to get bounding box: [numCommands, advanceWidth, advanceHeight, unitsPerEm, minX, minY, maxX, maxY]
+        val glyphMinX = rawData[4]
+        val glyphMinY = rawData[5]
+        val glyphMaxX = rawData[6]
+        val glyphMaxY = rawData[7]
+
+        // Calculate transformation for the target size
+        val glyphCenterX = (glyphMinX + glyphMaxX) / 2f
+        val glyphCenterY = (glyphMinY + glyphMaxY) / 2f
+        val glyphWidth = glyphMaxX - glyphMinX
+        val glyphHeight = glyphMaxY - glyphMinY
+        val maxGlyphDimension = maxOf(glyphWidth, glyphHeight)
+        val scaleValue = if (maxGlyphDimension > 0f && targetSizePx > 0f) {
+            targetSizePx / maxGlyphDimension
+        } else {
+            1f
+        }
+
+        // Calculate translation to center the glyph
+        val translateX = if (targetSizePx > 0f) {
+            targetSizePx / 2f - glyphCenterX * scaleValue
+        } else {
+            -glyphCenterX
+        }
+        val translateY = if (targetSizePx > 0f) {
+            targetSizePx / 2f + glyphCenterY * scaleValue  // Add because Y will be flipped
+        } else {
+            glyphCenterY
+        }
+
+        // Delegate to PathData to update the path with transformation
+        return pathData.update(
+            rawData,
+            scaleX = scaleValue,
+            scaleY = -scaleValue,  // Flip Y coordinate system
+            translateX = translateX,
+            translateY = translateY
+        )
     }
 
     /**
-     * Initial update with optional axis values.
+     * Initial update with optional axis values and size.
      * Called during initialization.
      */
-    internal fun initialize(initialAxes: Map<String, Float> = emptyMap()): Boolean {
+    internal fun initialize(
+        initialAxes: Map<String, Float> = emptyMap(),
+        sizePx: Float = 0f
+    ): Boolean {
         axes.clear()
         axes.putAll(initialAxes)
+        targetSizePx = sizePx
         return updatePath()
     }
 }
 
 /**
  * Remembers a glyph and its path state from a font.
- * The glyph path is cached and efficiently updated when axis values change.
+ * The glyph path is cached and efficiently updated when axis values or size change.
+ * The path is pre-scaled to the target size for efficient rendering without canvas scaling.
  *
  * Example usage:
  * ```
  * val extractor = remember { FontPathExtractor.fromResource(context, R.font.my_font) }
- * val glyph = rememberGlyph(extractor, '★', axes = mapOf("FILL" to 1f, "wght" to 400f))
+ * val glyph = rememberGlyph(
+ *     extractor,
+ *     '★',
+ *     size = 48.dp,
+ *     axes = mapOf("FILL" to 1f, "wght" to 400f)
+ * )
  *
  * glyph?.let {
  *     Glyph(it, size = 48.dp, tint = Color.Blue)
@@ -297,6 +353,7 @@ class GlyphState internal constructor(
  *
  * @param extractor Font path extractor instance
  * @param char Character to render
+ * @param size Target size for the glyph (the path will be pre-scaled to this size)
  * @param axes Variable font axis values (e.g., "FILL" to 1f, "wght" to 400f)
  * @return GlyphState instance, or null if glyph not found
  */
@@ -304,14 +361,16 @@ class GlyphState internal constructor(
 fun rememberGlyph(
     extractor: FontPathExtractor,
     char: Char,
+    size: Dp = 24.dp,
     axes: Map<String, Float> = emptyMap()
-): GlyphState? = rememberGlyph(extractor, char.code, axes)
+): GlyphState? = rememberGlyph(extractor, char.code, size, axes)
 
 /**
  * Remembers a glyph and its path state from a font using a codepoint.
  *
  * @param extractor Font path extractor instance
  * @param codepoint Unicode codepoint of the glyph
+ * @param size Target size for the glyph (the path will be pre-scaled to this size)
  * @param axes Variable font axis values (e.g., "FILL" to 1f, "wght" to 400f)
  * @return GlyphState instance, or null if glyph not found
  */
@@ -319,15 +378,18 @@ fun rememberGlyph(
 fun rememberGlyph(
     extractor: FontPathExtractor,
     codepoint: Int,
+    size: Dp = 24.dp,
     axes: Map<String, Float> = emptyMap()
 ): GlyphState? {
+    val sizePx = with(LocalDensity.current) { size.toPx() }
+
     var glyphState by remember(extractor, codepoint) {
         mutableStateOf<GlyphState?>(null)
     }
 
-    LaunchedEffect(extractor, codepoint, axes) {
+    LaunchedEffect(extractor, codepoint, sizePx, axes) {
         val glyph = glyphState ?: GlyphState(extractor, codepoint).also { glyphState = it }
-        glyph.initialize(axes)
+        glyph.initialize(axes, sizePx)
     }
 
     return glyphState
@@ -336,50 +398,29 @@ fun rememberGlyph(
 /**
  * Renders a glyph as a vector icon.
  *
- * Use `rememberGlyph()` to create the GlyphState instance.
+ * Use `rememberGlyph()` to create the GlyphState instance with the target size.
+ * The path is already scaled to pixel space, so stroke widths work correctly.
  *
- * @param glyph The glyph state to render
+ * @param glyph The glyph state to render (path is already scaled)
+ * @param size The display size (should match the size passed to rememberGlyph)
  * @param modifier Modifier to apply to the icon
- * @param size Size of the icon (default: 24.dp)
  * @param tint Color to tint the icon (default: Color.Black)
- * @param style Drawing style (Fill or Stroke)
+ * @param style Drawing style (Fill or Stroke with pixel-based width)
  */
 @Composable
 fun Glyph(
     glyph: GlyphState,
+    size: Dp,
     modifier: Modifier = Modifier,
-    size: Dp = 24.dp,
     tint: Color = Color.Black,
-    style: DrawStyle = Fill
+    style: DrawStyle = Stroke(1f)
 ) {
     Canvas(modifier = modifier.size(size)) {
-        val canvasSize = this.size.minDimension
-
-        // Calculate the glyph's bounding box center
-        val glyphCenterX = (glyph.minX + glyph.maxX) / 2f
-        val glyphCenterY = (glyph.minY + glyph.maxY) / 2f
-
-        // Calculate scale to fit the glyph in the canvas
-        val glyphWidth = glyph.maxX - glyph.minX
-        val glyphHeight = glyph.maxY - glyph.minY
-        val maxGlyphDimension = maxOf(glyphWidth, glyphHeight)
-        val scaleValue = if (maxGlyphDimension > 0f) canvasSize / maxGlyphDimension else canvasSize
-
-        // Center the canvas and offset by the glyph's center
-        // When we flip Y with negative scale, we need to account for that in translation
-        val translateX = canvasSize / 2f - glyphCenterX * scaleValue
-        val translateY =
-            canvasSize / 2f + glyphCenterY * scaleValue  // Add because Y will be flipped
-
-        translate(translateX, translateY) {
-            // Use negative Y scale to flip coordinate system
-            scale(scaleX = scaleValue, scaleY = -scaleValue, pivot = Offset.Zero) {
-                drawPath(
-                    path = glyph.composePath,
-                    color = tint,
-                    style = style
-                )
-            }
-        }
+        // Path is already scaled and centered in pixel space - just draw it!
+        drawPath(
+            path = glyph.composePath,
+            color = tint,
+            style = style
+        )
     }
 }
