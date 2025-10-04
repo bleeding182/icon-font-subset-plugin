@@ -136,27 +136,18 @@ namespace fontsubsetting {
         ctx->commands->push_back(cmd);
     }
 
-    // GlyphHandle implementation
-    GlyphHandle::GlyphHandle()
-            : blob(nullptr), face(nullptr), font(nullptr), buffer(nullptr),
-              draw_funcs(nullptr), glyph_id(0), codepoint(0), upem(0) {}
+    // SharedFontData implementation
+    SharedFontData::SharedFontData()
+            : blob(nullptr), face(nullptr), prototypeFont(nullptr), upem(0) {}
 
-    GlyphHandle::~GlyphHandle() {
+    SharedFontData::~SharedFontData() {
         destroy();
     }
 
-    void GlyphHandle::destroy() {
-        if (draw_funcs) {
-            hb_draw_funcs_destroy(draw_funcs);
-            draw_funcs = nullptr;
-        }
-        if (buffer) {
-            hb_buffer_destroy(buffer);
-            buffer = nullptr;
-        }
-        if (font) {
-            hb_font_destroy(font);
-            font = nullptr;
+    void SharedFontData::destroy() {
+        if (prototypeFont) {
+            hb_font_destroy(prototypeFont);
+            prototypeFont = nullptr;
         }
         if (face) {
             hb_face_destroy(face);
@@ -168,12 +159,10 @@ namespace fontsubsetting {
         }
     }
 
-    bool GlyphHandle::initialize(const void *fontData, size_t fontDataSize, unsigned int cp) {
+    bool SharedFontData::initialize(const void *fontData, size_t fontDataSize) {
         if (!fontData || fontDataSize == 0) {
             return false;
         }
-
-        codepoint = cp;
 
         // Create HarfBuzz blob from font data
         blob = hb_blob_create(
@@ -198,28 +187,60 @@ namespace fontsubsetting {
         // Get units per EM
         upem = hb_face_get_upem(face);
 
-        // Create font
-        font = hb_font_create(face);
-        if (!font) {
+        // Create prototype font (will be cloned per glyph if needed)
+        prototypeFont = hb_font_create(face);
+        if (!prototypeFont) {
             destroy();
             return false;
         }
 
-        // Create buffer for shaping (reusable)
+        return true;
+    }
+
+    // GlyphHandle implementation
+    GlyphHandle::GlyphHandle()
+            : sharedFont(nullptr), buffer(nullptr), draw_funcs(nullptr),
+              glyph_id(0), codepoint(0) {}
+
+    GlyphHandle::~GlyphHandle() {
+        destroy();
+    }
+
+    void GlyphHandle::destroy() {
+        if (draw_funcs) {
+            hb_draw_funcs_destroy(draw_funcs);
+            draw_funcs = nullptr;
+        }
+        if (buffer) {
+            hb_buffer_destroy(buffer);
+            buffer = nullptr;
+        }
+        // Don't touch sharedFont - we don't own it
+    }
+
+    bool GlyphHandle::initialize(SharedFontData *sharedFontData, unsigned int cp) {
+        if (!sharedFontData || !sharedFontData->prototypeFont) {
+            return false;
+        }
+
+        sharedFont = sharedFontData;
+        codepoint = cp;
+
+        // Create buffer for shaping (per-glyph, reusable)
         buffer = hb_buffer_create();
         if (!buffer) {
             destroy();
             return false;
         }
 
-        // Create draw funcs (reusable)
+        // Create draw funcs (per-glyph, reusable)
         draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
             destroy();
             return false;
         }
 
-        // Set callbacks on draw_funcs (only needs to be done once)
+        // Set callbacks on draw_funcs (only needs to be done once per glyph)
         hb_draw_funcs_set_move_to_func(draw_funcs, move_to_func, nullptr, nullptr);
         hb_draw_funcs_set_line_to_func(draw_funcs, line_to_func, nullptr, nullptr);
         hb_draw_funcs_set_quadratic_to_func(draw_funcs, quadratic_to_func, nullptr, nullptr);
@@ -233,7 +254,7 @@ namespace fontsubsetting {
         hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
         hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
 
-        hb_shape(font, buffer, nullptr, 0);
+        hb_shape(sharedFont->prototypeFont, buffer, nullptr, 0);
 
         // Get glyph info
         unsigned int glyph_count;
@@ -253,11 +274,11 @@ namespace fontsubsetting {
     GlyphPath GlyphHandle::extractPath(const Variation *variations, size_t variationCount) {
         GlyphPath result;
 
-        if (!font || !buffer || !draw_funcs) {
+        if (!sharedFont || !glyph_id) {
             return result;
         }
 
-        result.unitsPerEm = static_cast<int>(upem);
+        result.unitsPerEm = sharedFont->upem;
 
         // Apply variable font variations if provided
         if (variationCount > 0 && variations) {
@@ -275,10 +296,10 @@ namespace fontsubsetting {
                 hb_variations[i].value = variations[i].value;
             }
 
-            hb_font_set_variations(font, hb_variations, actual_count);
+            hb_font_set_variations(sharedFont->prototypeFont, hb_variations, actual_count);
         } else {
             // Clear variations (set to defaults)
-            hb_font_set_variations(font, nullptr, 0);
+            hb_font_set_variations(sharedFont->prototypeFont, nullptr, 0);
         }
 
         // Re-shape with new variations to apply RVRN feature
@@ -288,7 +309,7 @@ namespace fontsubsetting {
         hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
         hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
 
-        hb_shape(font, buffer, nullptr, 0);
+        hb_shape(sharedFont->prototypeFont, buffer, nullptr, 0);
 
         // Get updated glyph ID (may change with variations)
         unsigned int glyph_count;
@@ -301,8 +322,9 @@ namespace fontsubsetting {
         glyph_id = glyph_info[0].codepoint;
 
         // Get glyph metrics
-        hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
-        float scale = 1.0f / static_cast<float>(upem);
+        hb_position_t advance_width = hb_font_get_glyph_h_advance(sharedFont->prototypeFont,
+                                                                  glyph_id);
+        float scale = 1.0f / static_cast<float>(sharedFont->upem);
         result.advanceWidth = static_cast<float>(advance_width) * scale;
 
         // Prepare context for path drawing
@@ -310,7 +332,7 @@ namespace fontsubsetting {
         ctx.commands = &result.commands;
 
         // Extract glyph outline
-        hb_font_draw_glyph(font, glyph_id, draw_funcs, &ctx);
+        hb_font_draw_glyph(sharedFont->prototypeFont, glyph_id, draw_funcs, &ctx);
 
         // Scale all path coordinates to normalized space
         for (size_t i = 0; i < result.commands.size; i++) {
@@ -414,217 +436,17 @@ namespace fontsubsetting {
             return result;
         }
 
-        // Create HarfBuzz blob from font data
-        hb_blob_t *blob = hb_blob_create(
-                static_cast<const char *>(fontData),
-                static_cast<unsigned int>(fontDataSize),
-                HB_MEMORY_MODE_READONLY,
-                nullptr,
-                nullptr
-        );
-
-        if (!blob) {
+        SharedFontData sharedData;
+        if (!sharedData.initialize(fontData, fontDataSize)) {
             return result;
         }
 
-        // Create face
-        hb_face_t *face = hb_face_create(blob, 0);
-        hb_blob_destroy(blob); // Clean up blob immediately
-
-        if (!face) {
+        GlyphHandle glyphHandle;
+        if (!glyphHandle.initialize(&sharedData, codepoint)) {
             return result;
         }
 
-        // Get units per EM - this is our coordinate system
-        unsigned int upem = hb_face_get_upem(face);
-        result.unitsPerEm = static_cast<int>(upem);
-
-        // Create font
-        hb_font_t *font = hb_font_create(face);
-        if (!font) {
-            hb_face_destroy(face);
-            return result;
-        }
-
-        // Apply variable font variations if provided
-        if (variationCount > 0 && variations) {
-            // Stack allocate for reasonable number of variations (up to 16)
-            hb_variation_t hb_variations[16];
-            size_t actual_count = variationCount > 16 ? 16 : variationCount;
-
-            for (size_t i = 0; i < actual_count; i++) {
-                const char *tag_str = variations[i].tag;
-                // Convert tag string to HarfBuzz tag (4-byte code)
-                hb_variations[i].tag = HB_TAG(
-                        tag_str[0] ? tag_str[0] : ' ',
-                        tag_str[1] ? tag_str[1] : ' ',
-                        tag_str[2] ? tag_str[2] : ' ',
-                        tag_str[3] ? tag_str[3] : ' '
-                );
-                hb_variations[i].value = variations[i].value;
-            }
-
-            hb_font_set_variations(font, hb_variations, actual_count);
-        }
-
-        // Create buffer for shaping (needed to apply RVRN feature for variable fonts)
-        hb_buffer_t *buffer = hb_buffer_create();
-        if (!buffer) {
-            hb_font_destroy(font);
-            hb_face_destroy(face);
-            return result;
-        }
-
-        // Add codepoint to buffer
-        hb_buffer_add(buffer, codepoint, 0);
-        hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
-        hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
-        hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
-
-        // Shape the buffer - this applies OpenType features including RVRN
-        // RVRN (Required Variation Substitutions) is crucial for variable fonts
-        hb_shape(font, buffer, nullptr, 0);
-
-        // Get glyph info from shaped buffer
-        unsigned int glyph_count;
-        hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buffer, &glyph_count);
-
-        if (glyph_count == 0 || !glyph_info) {
-            hb_buffer_destroy(buffer);
-            hb_font_destroy(font);
-            hb_face_destroy(face);
-            return result;
-        }
-
-        // Get the actual glyph ID after shaping (may be substituted by RVRN)
-        hb_codepoint_t glyph_id = glyph_info[0].codepoint;
-
-        // Get glyph metrics (in font units)
-        hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
-
-        // Normalize to 0-1 range based on upem
-        float scale = 1.0f / static_cast<float>(upem);
-        result.advanceWidth = static_cast<float>(advance_width) * scale;
-
-        // Create draw funcs for path extraction
-        hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
-        if (!draw_funcs) {
-            hb_buffer_destroy(buffer);
-            hb_font_destroy(font);
-            hb_face_destroy(face);
-            return result;
-        }
-
-        // Set callbacks
-        hb_draw_funcs_set_move_to_func(draw_funcs, move_to_func, nullptr, nullptr);
-        hb_draw_funcs_set_line_to_func(draw_funcs, line_to_func, nullptr, nullptr);
-        hb_draw_funcs_set_quadratic_to_func(draw_funcs, quadratic_to_func, nullptr, nullptr);
-        hb_draw_funcs_set_cubic_to_func(draw_funcs, cubic_to_func, nullptr, nullptr);
-        hb_draw_funcs_set_close_path_func(draw_funcs, close_path_func, nullptr, nullptr);
-
-        // Prepare context for path drawing
-        PathDrawContext ctx;
-        ctx.commands = &result.commands;
-
-        // Extract glyph outline - coordinates will be in font units
-        hb_font_draw_glyph(font, glyph_id, draw_funcs, &ctx);
-
-        // Scale all path coordinates to normalized space
-        for (size_t i = 0; i < result.commands.size; i++) {
-            PathCommand &cmd = result.commands.data[i];
-
-            // Scale based on command type
-            switch (cmd.type) {
-                case PathCommand::MOVE_TO:
-                case PathCommand::LINE_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    break;
-
-                case PathCommand::QUADRATIC_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    cmd.x2 *= scale;
-                    cmd.y2 *= scale;
-                    break;
-
-                case PathCommand::CUBIC_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    cmd.x2 *= scale;
-                    cmd.y2 *= scale;
-                    cmd.x3 *= scale;
-                    cmd.y3 *= scale;
-                    break;
-
-                case PathCommand::CLOSE:
-                    // No coordinates to scale
-                    break;
-            }
-        }
-
-        // Calculate bounding box from path coordinates
-        // Note: This uses control points, which gives a conservative (possibly loose) bound
-        // The actual Bezier curves may not reach all control points, but will never exceed them
-        float pathMinX = FLT_MAX, pathMinY = FLT_MAX, pathMaxX = -FLT_MAX, pathMaxY = -FLT_MAX;
-        for (size_t i = 0; i < result.commands.size; i++) {
-            PathCommand &cmd = result.commands.data[i];
-
-            // Update bounds based on command type
-            switch (cmd.type) {
-                case PathCommand::MOVE_TO:
-                case PathCommand::LINE_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
-                    break;
-
-                case PathCommand::QUADRATIC_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
-                    pathMinX = min(pathMinX, cmd.x2);
-                    pathMinY = min(pathMinY, cmd.y2);
-                    pathMaxX = max(pathMaxX, cmd.x2);
-                    pathMaxY = max(pathMaxY, cmd.y2);
-                    break;
-
-                case PathCommand::CUBIC_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
-                    pathMinX = min(pathMinX, cmd.x2);
-                    pathMinY = min(pathMinY, cmd.y2);
-                    pathMaxX = max(pathMaxX, cmd.x2);
-                    pathMaxY = max(pathMaxY, cmd.y2);
-                    pathMinX = min(pathMinX, cmd.x3);
-                    pathMinY = min(pathMinY, cmd.y3);
-                    pathMaxX = max(pathMaxX, cmd.x3);
-                    pathMaxY = max(pathMaxY, cmd.y3);
-                    break;
-
-                case PathCommand::CLOSE:
-                    // No coordinates to update bounds
-                    break;
-            }
-        }
-
-        // Use path-calculated bounds (conservative but always correct)
-        result.minX = pathMinX;
-        result.minY = pathMinY;
-        result.maxX = pathMaxX;
-        result.maxY = pathMaxY;
-
-        // Clean up
-        hb_draw_funcs_destroy(draw_funcs);
-        hb_buffer_destroy(buffer);
-        hb_font_destroy(font);
-        hb_face_destroy(face);
-
-        return result;
+        return glyphHandle.extractPath(variations, variationCount);
     }
 
 } // namespace fontsubsetting

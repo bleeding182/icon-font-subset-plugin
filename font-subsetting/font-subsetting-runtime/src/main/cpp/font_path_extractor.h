@@ -62,30 +62,50 @@ namespace fontsubsetting {
     };
 
     /**
-     * Reusable glyph handle that caches HarfBuzz objects for efficient axis updates.
-     * This avoids recreating HarfBuzz face/font/buffer/draw_funcs on every extraction.
+     * Shared font data that can be reused across multiple glyphs.
+     * Contains the HarfBuzz blob, face, and a prototype font.
+     * This reduces memory usage and initialization overhead.
      */
-    struct GlyphHandle {
+    struct SharedFontData {
         hb_blob_t *blob;
         hb_face_t *face;
-        hb_font_t *font;
+        hb_font_t *prototypeFont;  // Reusable font object
+        unsigned int upem;
+
+        SharedFontData();
+
+        ~SharedFontData();
+
+        // Initialize from font data
+        bool initialize(const void *fontData, size_t fontDataSize);
+
+        // Clean up all HarfBuzz resources
+        void destroy();
+    };
+
+    /**
+     * Reusable glyph handle that caches per-glyph HarfBuzz objects.
+     * References a shared SharedFontData to avoid duplicating font resources.
+     * Each glyph has its own buffer and draw_funcs, but shares the font.
+     */
+    struct GlyphHandle {
+        SharedFontData *sharedFont;  // Reference to shared font data (not owned)
         hb_buffer_t *buffer;
         hb_draw_funcs_t *draw_funcs;
         hb_codepoint_t glyph_id;
         unsigned int codepoint;
-        unsigned int upem;
 
         GlyphHandle();
 
         ~GlyphHandle();
 
-        // Initialize the handle with font data and codepoint
-        bool initialize(const void *fontData, size_t fontDataSize, unsigned int cp);
+        // Initialize the handle with shared font data and codepoint
+        bool initialize(SharedFontData *sharedFontData, unsigned int cp);
 
         // Extract path with current variations (reuses HarfBuzz objects)
         GlyphPath extractPath(const Variation *variations, size_t variationCount);
 
-        // Clean up all HarfBuzz resources
+        // Clean up per-glyph HarfBuzz resources (doesn't touch shared font)
         void destroy();
     };
 

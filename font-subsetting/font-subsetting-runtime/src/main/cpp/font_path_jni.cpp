@@ -11,9 +11,11 @@ void *realloc(void *, size_t);
 #include "font_path_extractor.h"
 
 // Native font handle structure - stores font data in native memory
+// and a shared HarfBuzz font object that is reused by all glyphs
 struct NativeFontHandle {
-    void* fontData;
-    size_t fontDataSize;
+    void *fontData;                                // Raw font file data
+    size_t fontDataSize;                           // Size of font data
+    fontsubsetting::SharedFontData *sharedFont;    // Shared HarfBuzz objects (blob, face, font)
 };
 
 // Helper function to convert integer tag to 4-byte tag string
@@ -112,6 +114,8 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeCreateFont
     NativeFontHandle* handle = new NativeFontHandle();
     handle->fontData = nativeFontData;
     handle->fontDataSize = static_cast<size_t>(fontDataSize);
+    handle->sharedFont = new fontsubsetting::SharedFontData();
+    handle->sharedFont->initialize(handle->fontData, handle->fontDataSize);
 
     return reinterpret_cast<jlong>(handle);
 }
@@ -131,6 +135,10 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeDestroyFon
         free(handle->fontData);
         handle->fontData = nullptr;
     }
+    if (handle->sharedFont) {
+        delete handle->sharedFont;
+        handle->sharedFont = nullptr;
+    }
     delete handle;
 }
 
@@ -147,7 +155,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
 
     NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
 
-    // Extract glyph path using stored font data
+    // Extract glyph path using raw font data for convenience JNI methods
     auto glyphPath = fontsubsetting::extractGlyphPath(
             handle->fontData,
             handle->fontDataSize,
@@ -199,7 +207,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
         }
     }
 
-    // Extract glyph path with variations using stored font data
+    // Extract glyph path with variations using raw font data for convenience JNI methods
     auto glyphPath = fontsubsetting::extractGlyphPathWithVariations(
             handle->fontData,
             handle->fontDataSize,
@@ -229,8 +237,8 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeCreateGlyp
     NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
 
     auto* glyphHandle = new fontsubsetting::GlyphHandle();
-    if (!glyphHandle->initialize(handle->fontData, handle->fontDataSize, 
-                                   static_cast<unsigned int>(codepoint))) {
+    if (!glyphHandle->initialize(handle->sharedFont,
+                                 static_cast<unsigned int>(codepoint))) {
         delete glyphHandle;
         return 0;
     }
