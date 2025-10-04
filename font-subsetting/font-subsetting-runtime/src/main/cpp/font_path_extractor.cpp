@@ -1,21 +1,7 @@
 #include "font_path_extractor.h"
 #include <hb.h>
-#include <android/log.h>
 #include <cstdlib>
 #include <cfloat>
-
-#define LOG_TAG "FontPathExtractor"
-
-// Disable logging in release builds to save binary size
-#ifdef NDEBUG
-#define LOGI(...)
-#define LOGE(...)
-#define LOGD(...)
-#else
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
-#endif
 
 // Lightweight min/max to avoid <algorithm> header bloat
 template<typename T>
@@ -25,34 +11,6 @@ template<typename T>
 static inline T max(T a, T b) { return a > b ? a : b; }
 
 namespace fontsubsetting {
-
-// RAII wrapper for HarfBuzz blob
-    struct HBBlobDeleter {
-        void operator()(hb_blob_t *blob) const {
-            if (blob) hb_blob_destroy(blob);
-        }
-    };
-
-// RAII wrapper for HarfBuzz face
-    struct HBFaceDeleter {
-        void operator()(hb_face_t *face) const {
-            if (face) hb_face_destroy(face);
-        }
-    };
-
-// RAII wrapper for HarfBuzz font
-    struct HBFontDeleter {
-        void operator()(hb_font_t *font) const {
-            if (font) hb_font_destroy(font);
-        }
-    };
-
-// RAII wrapper for HarfBuzz draw funcs
-    struct HBDrawFuncsDeleter {
-        void operator()(hb_draw_funcs_t *funcs) const {
-            if (funcs) hb_draw_funcs_destroy(funcs);
-        }
-    };
 
 // Context for path drawing callbacks
     struct PathDrawContext {
@@ -76,7 +34,6 @@ namespace fontsubsetting {
 
     PathCommand *new_data = (PathCommand *) realloc(data, new_capacity * sizeof(PathCommand));
     if (!new_data) {
-        LOGE("Failed to allocate memory for path commands");
         return;
     }
     data = new_data;
@@ -185,7 +142,6 @@ namespace fontsubsetting {
         GlyphPath result;
 
         if (!fontData || fontDataSize == 0) {
-            LOGE("Invalid font data");
             return result;
         }
 
@@ -199,7 +155,6 @@ namespace fontsubsetting {
         );
 
         if (!blob) {
-            LOGE("Failed to create blob");
             return result;
         }
 
@@ -208,7 +163,6 @@ namespace fontsubsetting {
         hb_blob_destroy(blob); // Clean up blob immediately
 
         if (!face) {
-            LOGE("Failed to create face");
             return result;
         }
 
@@ -219,7 +173,6 @@ namespace fontsubsetting {
         // Create font
         hb_font_t *font = hb_font_create(face);
         if (!font) {
-            LOGE("Failed to create font");
             hb_face_destroy(face);
             return result;
         }
@@ -240,8 +193,6 @@ namespace fontsubsetting {
                         tag_str[3] ? tag_str[3] : ' '
                 );
                 hb_variations[i].value = variations[i].value;
-
-                LOGD("Applying variation: %s = %.2f", tag_str, variations[i].value);
             }
 
             hb_font_set_variations(font, hb_variations, actual_count);
@@ -250,7 +201,6 @@ namespace fontsubsetting {
         // Create buffer for shaping (needed to apply RVRN feature for variable fonts)
         hb_buffer_t *buffer = hb_buffer_create();
         if (!buffer) {
-            LOGE("Failed to create buffer");
             hb_font_destroy(font);
             hb_face_destroy(face);
             return result;
@@ -271,7 +221,6 @@ namespace fontsubsetting {
         hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buffer, &glyph_count);
 
         if (glyph_count == 0 || !glyph_info) {
-            LOGD("Glyph not found for codepoint U+%04X", codepoint);
             hb_buffer_destroy(buffer);
             hb_font_destroy(font);
             hb_face_destroy(face);
@@ -280,8 +229,6 @@ namespace fontsubsetting {
 
         // Get the actual glyph ID after shaping (may be substituted by RVRN)
         hb_codepoint_t glyph_id = glyph_info[0].codepoint;
-
-        LOGD("Codepoint U+%04X shaped to glyph %u", codepoint, glyph_id);
 
         // Get glyph metrics (in font units)
         hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
@@ -293,7 +240,6 @@ namespace fontsubsetting {
         // Create draw funcs for path extraction
         hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
-            LOGE("Failed to create draw funcs");
             hb_buffer_destroy(buffer);
             hb_font_destroy(font);
             hb_face_destroy(face);
@@ -313,8 +259,6 @@ namespace fontsubsetting {
 
         // Extract glyph outline - coordinates will be in font units
         hb_font_draw_glyph(font, glyph_id, draw_funcs, &ctx);
-
-        LOGD("Extracted %zu path commands from glyph %u", result.commands.size, glyph_id);
 
         // Scale all path coordinates to normalized space
         for (size_t i = 0; i < result.commands.size; i++) {
@@ -405,17 +349,11 @@ namespace fontsubsetting {
         result.maxX = pathMaxX;
         result.maxY = pathMaxY;
 
-        LOGD("Bounding box from path control points: minX=%.3f, minY=%.3f, maxX=%.3f, maxY=%.3f",
-             result.minX, result.minY, result.maxX, result.maxY);
-
         // Clean up
         hb_draw_funcs_destroy(draw_funcs);
         hb_buffer_destroy(buffer);
         hb_font_destroy(font);
         hb_face_destroy(face);
-
-        LOGD("Extracted %zu path commands for codepoint U+%04X (glyph %u) with %zu variations",
-             result.commands.size, codepoint, glyph_id, variationCount);
 
         return result;
     }

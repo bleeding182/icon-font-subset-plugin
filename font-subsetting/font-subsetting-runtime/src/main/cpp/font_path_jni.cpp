@@ -1,16 +1,6 @@
 #include <jni.h>
-#include <android/log.h>
 #include <cstdlib>
 #include "font_path_extractor.h"
-
-#define LOG_TAG "FontPathJNI"
-
-// Disable logging in release builds to save binary size
-#ifdef NDEBUG
-#define LOGE(...)
-#else
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#endif
 
 // Helper function to pack GlyphPath into a jfloatArray
 // Returns null on allocation failure
@@ -23,14 +13,12 @@ static jfloatArray packGlyphPathToArray(JNIEnv *env, const fontsubsetting::Glyph
 
     jfloatArray result = env->NewFloatArray(static_cast<jsize>(totalSize));
     if (!result) {
-        LOGE("Failed to allocate result array");
         return nullptr;
     }
 
     // Allocate temporary buffer for packing
     float *data = static_cast<float *>(malloc(totalSize * sizeof(float)));
     if (!data) {
-        LOGE("Failed to allocate data buffer");
         return nullptr;
     }
 
@@ -73,7 +61,6 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
         jint codepoint) {
 
     if (!fontData) {
-        LOGE("Font data is null");
         return nullptr;
     }
 
@@ -82,7 +69,6 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     jbyte *fontBytes = env->GetByteArrayElements(fontData, nullptr);
 
     if (!fontBytes) {
-        LOGE("Failed to get font data bytes");
         return nullptr;
     }
 
@@ -114,7 +100,6 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
         jfloatArray variationValues) {
 
     if (!fontData) {
-        LOGE("Font data is null");
         return nullptr;
     }
 
@@ -123,7 +108,6 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     jbyte *fontBytes = env->GetByteArrayElements(fontData, nullptr);
 
     if (!fontBytes) {
-        LOGE("Failed to get font data bytes");
         return nullptr;
     }
 
