@@ -209,7 +209,7 @@ fun GlyphLibraryDemo() {
 
     // Animate fill 0-1 and grade 0-200
     val infiniteTransition = rememberInfiniteTransition(label = "glyph_animation")
-    val fill by infiniteTransition.animateFloat(
+    val fillState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
@@ -218,7 +218,7 @@ fun GlyphLibraryDemo() {
         ),
         label = "fill"
     )
-    val grade by infiniteTransition.animateFloat(
+    val gradeState = infiniteTransition.animateFloat(
         initialValue = 0f,
         targetValue = 200f,
         animationSpec = infiniteRepeatable(
@@ -253,8 +253,8 @@ fun GlyphLibraryDemo() {
             char = icon.first(),
             name = name,
             pathExtractor = pathExtractor,
-            fill = fill,
-            grade = grade
+            fillProvider = { fillState.value },
+            gradeProvider = { gradeState.value }
         )
     }
 }
@@ -337,8 +337,8 @@ fun GlyphIconCard(
     char: Char,
     name: String,
     pathExtractor: FontPathExtractor,
-    fill: Float,
-    grade: Float
+    fillProvider: () -> Float,
+    gradeProvider: () -> Float
 ) {
     val glyph = rememberGlyph(
         extractor = pathExtractor,
@@ -346,17 +346,18 @@ fun GlyphIconCard(
         size = 20.dp
     )
 
-    // Use LaunchedEffect to update axes when fill or grade change
-    // Now using integer axis tags for zero-allocation performance
-    androidx.compose.runtime.LaunchedEffect(fill, grade, glyph) {
-        glyph?.updateAxes {
-            put(AxisTag.FILL, fill)
-            put(AxisTag.WGHT, 400f)
-            put(AxisTag.GRAD, grade)
-        }
-    }
-
     IconCard(name = name) {
+        // Use LaunchedEffect to update axes when fill or grade change
+        // Now using integer axis tags for zero-allocation performance
+        val fill = fillProvider()
+        val grade = gradeProvider()
+        androidx.compose.runtime.LaunchedEffect(fill, grade, glyph) {
+            glyph?.updateAxes {
+                put(AxisTag.FILL, fill)
+                put(AxisTag.WGHT, 400f)
+                put(AxisTag.GRAD, grade)
+            }
+        }
         glyph?.let {
             Glyph(
                 glyph = it,
