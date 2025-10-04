@@ -62,9 +62,9 @@ fontSubsetting {
                 
                 // Limit weight to 400-700 range (normal to bold)
                 axis("wght").range(400f, 700f, 400f)
-                
-                // Remove grade axis completely
-                axis("GRAD").remove()
+
+                // Keep grade axis for morphing animations
+                axis("GRAD").range(-25f, 200f, 0f)
                 
                 // Keep optical size but limit to 24-48 range
                 axis("opsz").range(24f, 48f, 48f)

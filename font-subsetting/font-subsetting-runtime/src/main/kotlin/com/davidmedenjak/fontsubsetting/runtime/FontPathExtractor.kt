@@ -2,16 +2,19 @@ package com.davidmedenjak.fontsubsetting.runtime
 
 import android.content.Context
 import android.util.Log
-import androidx.annotation.RawRes
+import androidx.annotation.FontRes
 import java.io.InputStream
 
 /**
  * Extracts vector paths from font glyphs using HarfBuzz.
  * This allows rendering font glyphs as vector paths in Compose.
  *
+ * The font data is stored in native memory once during construction,
+ * and only a native pointer is passed across JNI for glyph extraction.
+ *
  * Use `rememberGlyph()` composable to render glyphs efficiently.
  */
-class FontPathExtractor {
+class FontPathExtractor : AutoCloseable {
 
     companion object {
         private const val TAG = "FontPathExtractor"
@@ -30,7 +33,7 @@ class FontPathExtractor {
         /**
          * Creates a FontPathExtractor from a font resource.
          */
-        fun fromResource(context: Context, @RawRes resourceId: Int): FontPathExtractor {
+        fun fromResource(context: Context, @FontRes resourceId: Int): FontPathExtractor {
             val fontData = context.resources.openRawResource(resourceId).use { it.readBytes() }
             return FontPathExtractor(fontData)
         }
@@ -51,13 +54,18 @@ class FontPathExtractor {
         }
     }
 
-    private val fontData: ByteArray
+    // Native pointer to font data stored in native memory
+    private var nativeFontPtr: Long = 0
 
     private constructor(fontData: ByteArray) {
         if (!nativeLibraryLoaded) {
             throw IllegalStateException("Native library not loaded")
         }
-        this.fontData = fontData
+        // Store font data in native memory once
+        nativeFontPtr = nativeCreateFontHandle(fontData)
+        if (nativeFontPtr == 0L) {
+            throw IllegalStateException("Failed to create native font handle")
+        }
     }
 
     /**
@@ -71,20 +79,23 @@ class FontPathExtractor {
         codepoint: Int,
         variations: Map<String, Float> = emptyMap()
     ): FloatArray? {
+        checkNotClosed()
+
         if (variations.isEmpty()) {
-            return nativeExtractGlyphPath(fontData, codepoint)
+            return nativeExtractGlyphPath(nativeFontPtr, codepoint)
         }
 
         val tags = variations.keys.toTypedArray()
         val values = variations.values.toFloatArray()
-        return nativeExtractGlyphPathWithVariations(fontData, codepoint, tags, values)
+        return nativeExtractGlyphPathWithVariations(nativeFontPtr, codepoint, tags, values)
     }
 
     /**
      * Extracts the raw glyph path for a codepoint without variations.
      */
     internal fun nativeExtractGlyphPathInternal(codepoint: Int): FloatArray? {
-        return nativeExtractGlyphPath(fontData, codepoint)
+        checkNotClosed()
+        return nativeExtractGlyphPath(nativeFontPtr, codepoint)
     }
 
     /**
@@ -95,17 +106,55 @@ class FontPathExtractor {
         variationTags: Array<String>,
         variationValues: FloatArray
     ): FloatArray? {
+        checkNotClosed()
         return nativeExtractGlyphPathWithVariations(
-            fontData,
+            nativeFontPtr,
             codepoint,
             variationTags,
             variationValues
         )
     }
 
-    private external fun nativeExtractGlyphPath(fontData: ByteArray, codepoint: Int): FloatArray?
+    override fun close() {
+        if (nativeFontPtr != 0L) {
+            nativeDestroyFontHandle(nativeFontPtr)
+            nativeFontPtr = 0
+        }
+    }
+
+    private fun checkNotClosed() {
+        if (nativeFontPtr == 0L) {
+            throw IllegalStateException("FontPathExtractor has been closed")
+        }
+    }
+
+    @Throws(Throwable::class)
+    protected fun finalize() {
+        // Fallback cleanup in case close() wasn't called
+        close()
+    }
+
+    /**
+     * Creates a native font handle from font data.
+     * Returns native pointer (as long) or 0 on failure.
+     */
+    private external fun nativeCreateFontHandle(fontData: ByteArray): Long
+
+    /**
+     * Destroys a native font handle and frees associated memory.
+     */
+    private external fun nativeDestroyFontHandle(fontPtr: Long)
+
+    /**
+     * Extracts glyph path using native font pointer.
+     */
+    private external fun nativeExtractGlyphPath(fontPtr: Long, codepoint: Int): FloatArray?
+
+    /**
+     * Extracts glyph path with variations using native font pointer.
+     */
     private external fun nativeExtractGlyphPathWithVariations(
-        fontData: ByteArray,
+        fontPtr: Long,
         codepoint: Int,
         variationTags: Array<String>,
         variationValues: FloatArray

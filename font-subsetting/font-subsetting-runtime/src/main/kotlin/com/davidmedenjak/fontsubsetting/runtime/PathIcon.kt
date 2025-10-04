@@ -1,8 +1,11 @@
 package com.davidmedenjak.fontsubsetting.runtime
 
+import android.content.Context
+import androidx.annotation.FontRes
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -14,9 +17,101 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import java.io.InputStream
+
+/**
+ * Remembers a [FontPathExtractor] and automatically cleans up native resources when disposed.
+ *
+ * This is the recommended way to create a FontPathExtractor in Compose, as it ensures
+ * proper cleanup of native memory when the composable leaves the composition.
+ *
+ * Example usage:
+ * ```kotlin
+ * val extractor = rememberFontPathExtractor(R.font.my_font)
+ * val glyph = rememberGlyph(extractor, '★', size = 48.dp)
+ * ```
+ *
+ * @param resourceId Font resource ID
+ * @param context Optional context (defaults to LocalContext.current)
+ * @return FontPathExtractor instance, or null if loading failed
+ */
+@Composable
+fun rememberFontPathExtractor(
+    @FontRes resourceId: Int,
+    context: Context = LocalContext.current
+): FontPathExtractor? {
+    val extractor = remember(resourceId) {
+        try {
+            FontPathExtractor.fromResource(context, resourceId)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    DisposableEffect(extractor) {
+        onDispose {
+            extractor?.close()
+        }
+    }
+
+    return extractor
+}
+
+/**
+ * Remembers a [FontPathExtractor] from raw bytes and automatically cleans up native resources when disposed.
+ *
+ * @param fontData Font file bytes
+ * @return FontPathExtractor instance, or null if loading failed
+ */
+@Composable
+fun rememberFontPathExtractor(fontData: ByteArray): FontPathExtractor? {
+    val extractor = remember(fontData) {
+        try {
+            FontPathExtractor.fromBytes(fontData)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    DisposableEffect(extractor) {
+        onDispose {
+            extractor?.close()
+        }
+    }
+
+    return extractor
+}
+
+/**
+ * Remembers a [FontPathExtractor] from an input stream and automatically cleans up native resources when disposed.
+ *
+ * Note: The input stream will be read and closed immediately during initial composition.
+ *
+ * @param inputStream Font file input stream
+ * @return FontPathExtractor instance, or null if loading failed
+ */
+@Composable
+fun rememberFontPathExtractor(inputStream: InputStream): FontPathExtractor? {
+    val extractor = remember(inputStream) {
+        try {
+            FontPathExtractor.fromStream(inputStream)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    DisposableEffect(extractor) {
+        onDispose {
+            extractor?.close()
+        }
+    }
+
+    return extractor
+}
 
 /**
  * # Font Subsetting Runtime - Compose API
@@ -37,10 +132,7 @@ import androidx.compose.ui.unit.dp
  * ## Basic Usage
  *
  * ```kotlin
- * val extractor = remember {
- *     FontPathExtractor.fromResource(context, R.font.my_font)
- * }
- *
+ * val extractor = rememberFontPathExtractor(R.font.my_font)
  * // Static glyph - path is pre-scaled to 48dp
  * val glyph = rememberGlyph(extractor, '★', size = 48.dp)
  * glyph?.let {
@@ -131,6 +223,9 @@ class GlyphState internal constructor(
     private val axes = mutableMapOf<String, Float>()
     private var targetSizePx: Float = 0f
 
+    // Observable state to trigger recomposition when path changes
+    private var pathVersion by mutableStateOf(0)
+
     /**
      * Width of the glyph bounding box
      */
@@ -172,9 +267,16 @@ class GlyphState internal constructor(
     val maxY: Float get() = pathData.maxY
 
     /**
-     * The Compose path for this glyph
+     * The Compose path for this glyph.
+     * Reading this property makes the composition observe path changes.
      */
-    internal val composePath: Path get() = pathData.composePath
+    internal val composePath: Path
+        get() {
+            // Access pathVersion to make this observable
+            @Suppress("UNUSED_EXPRESSION")
+            pathVersion
+            return pathData.composePath
+        }
 
     /**
      * Sets a single axis value and updates the path.
@@ -302,13 +404,20 @@ class GlyphState internal constructor(
         }
 
         // Delegate to PathData to update the path with transformation
-        return pathData.update(
+        val success = pathData.update(
             rawData,
             scaleX = scaleValue,
             scaleY = -scaleValue,  // Flip Y coordinate system
             translateX = translateX,
             translateY = translateY
         )
+
+        // Increment version to trigger recomposition
+        if (success) {
+            pathVersion++
+        }
+
+        return success
     }
 
     /**
@@ -333,7 +442,7 @@ class GlyphState internal constructor(
  *
  * Example usage:
  * ```
- * val extractor = remember { FontPathExtractor.fromResource(context, R.font.my_font) }
+ * val extractor = rememberFontPathExtractor(R.font.my_font)
  * val glyph = rememberGlyph(
  *     extractor,
  *     '★',

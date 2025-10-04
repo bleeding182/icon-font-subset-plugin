@@ -5,9 +5,8 @@ project(fontsubsetting-runtime C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Suppress HarfBuzz CMake deprecation warnings
-set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS ON CACHE BOOL "" FORCE)
-set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
+# Strip ALL debug info (-g0) and disable asserts (-DNDEBUG)
+add_compile_options(-DNDEBUG -g0)
 
 # Enable LTO (Link Time Optimization) only for Release builds
 # Debug builds skip LTO to avoid linker issues and speed up development
@@ -15,13 +14,15 @@ set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
 # Using manual -flto=thin instead
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    message(STATUS "Using manual -flto=thin for Release build (CMAKE_INTERPROCEDURAL_OPTIMIZATION disabled due to linker conflicts)")
 else ()
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION FALSE)
+    message(STATUS "LTO disabled for Debug build")
 endif ()
 
 # Compiler optimizations for size and performance
 add_compile_options(
-        -Oz                      # Optimize aggressively for size (more than -Os)
+        -Os                      # Optimize for size
         -ffunction-sections      # Each function in its own section (for --gc-sections)
         -fdata-sections          # Each data item in its own section (for --gc-sections)
         -fvisibility=hidden      # Hide symbols by default (reduces binary size)
@@ -29,9 +30,6 @@ add_compile_options(
         -fno-rtti                # Disable RTTI (reduces size, we don't use dynamic_cast/typeid)
         -fno-unwind-tables       # Don't emit unwind tables (saves ~12-14KB since we disabled exceptions)
         -fno-asynchronous-unwind-tables  # Don't emit async unwind tables
-        -fmerge-all-constants    # Merge identical constants (further size reduction)
-        -fno-ident               # Don't emit compiler identification strings
-        -Qunused-arguments       # Don't warn about unused arguments
 )
 
 # HarfBuzz size optimization flags
@@ -49,6 +47,7 @@ add_compile_definitions(
         HB_OPTIMIZE_SIZE         # Enable internal size optimizations
         HB_NO_UCD                # Don't include Unicode Character Database (~15-20KB saved!)
         HB_NO_UNICODE_FUNCS      # We don't use Unicode functions for shaping
+        HB_NO_GLYPH_NAMES        # Don't include Adobe Glyph List (~174 glyph names, saves ~3-5KB)
 )
 
 # Add LTO flag only for Release builds
@@ -56,12 +55,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_compile_options(-flto=thin)
 endif ()
 
-# Add -fno-stack-protector at the end of compile options to override NDK's -fstack-protector-strong
-add_compile_options(-fno-stack-protector)
+# Find Android libraries
+find_library(log-lib log)
+# libandroid not needed - we only use logging
 
 # HarfBuzz configuration - minimal build for path extraction only
-set(FETCHCONTENT_QUIET ON)
-
 include(FetchContent)
 
 FetchContent_Declare(
@@ -96,7 +94,7 @@ target_include_directories(fontsubsetting-runtime PRIVATE
 
 # Compiler-specific optimizations (additional per-target, but most are now global)
 target_compile_options(fontsubsetting-runtime PRIVATE
-        $<$<CONFIG:Release>:-Oz>
+        $<$<CONFIG:Release>:-Os>
 )
 
 # Linker optimizations - dead code elimination and strip unused sections
@@ -109,18 +107,21 @@ target_link_options(fontsubsetting-runtime PRIVATE
         -Wl,--icf=all                # Identical Code Folding - merge identical functions
         -Wl,--hash-style=gnu         # Use GNU hash style (smaller than both)
         -Wl,-O3                      # Linker optimization level
-        -s                           # Strip symbols at link time
 )
 
 target_link_libraries(fontsubsetting-runtime
         harfbuzz
 )
 
+# Only link log library for Debug builds (Release has logging disabled)
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_link_libraries(fontsubsetting-runtime ${log-lib})
+endif ()
+
 # Additional stripping in release builds
 if (CMAKE_BUILD_TYPE STREQUAL "Release")
     add_custom_command(TARGET fontsubsetting-runtime POST_BUILD
             COMMAND ${CMAKE_STRIP} --strip-unneeded $<TARGET_FILE:fontsubsetting-runtime>
             COMMAND ${CMAKE_STRIP} --strip-debug $<TARGET_FILE:fontsubsetting-runtime>
-            COMMAND ${CMAKE_STRIP} --remove-section=.comment $<TARGET_FILE:fontsubsetting-runtime>
     )
 endif ()
