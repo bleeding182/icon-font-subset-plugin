@@ -63,13 +63,21 @@ namespace fontsubsetting {
 
     /**
      * Shared font data that can be reused across multiple glyphs.
-     * Contains the HarfBuzz blob, face, and a prototype font.
-     * This reduces memory usage and initialization overhead.
+     * Contains the HarfBuzz blob, face, font, and reusable resources.
+     * This reduces memory usage and initialization overhead significantly.
+     * 
+     * Key optimizations:
+     * - Single HarfBuzz font shared across all glyph extractions
+     * - Reusable buffer (avoids 1-2KB allocation per extraction)
+     * - Reusable draw_funcs (avoids ~300B allocation + setup per extraction)
+     * - Direct extraction without intermediate GlyphHandle objects
      */
     struct SharedFontData {
         hb_blob_t *blob;
         hb_face_t *face;
-        hb_font_t *prototypeFont;  // Reusable font object
+        hb_font_t *prototypeFont;
+        hb_buffer_t *reusable_buffer;      // Reused for all shaping operations
+        hb_draw_funcs_t *draw_funcs;       // Reused for all path extractions
         unsigned int upem;
 
         SharedFontData();
@@ -79,33 +87,15 @@ namespace fontsubsetting {
         // Initialize from font data
         bool initialize(const void *fontData, size_t fontDataSize);
 
+        // Extract path directly without creating intermediate objects
+        // This is the main optimized path extraction method
+        GlyphPath extractPathDirect(
+                unsigned int codepoint,
+                const Variation *variations,
+                size_t variationCount
+        );
+
         // Clean up all HarfBuzz resources
-        void destroy();
-    };
-
-    /**
-     * Reusable glyph handle that caches per-glyph HarfBuzz objects.
-     * References a shared SharedFontData to avoid duplicating font resources.
-     * Each glyph has its own buffer and draw_funcs, but shares the font.
-     */
-    struct GlyphHandle {
-        SharedFontData *sharedFont;  // Reference to shared font data (not owned)
-        hb_buffer_t *buffer;
-        hb_draw_funcs_t *draw_funcs;
-        hb_codepoint_t glyph_id;
-        unsigned int codepoint;
-
-        GlyphHandle();
-
-        ~GlyphHandle();
-
-        // Initialize the handle with shared font data and codepoint
-        bool initialize(SharedFontData *sharedFontData, unsigned int cp);
-
-        // Extract path with current variations (reuses HarfBuzz objects)
-        GlyphPath extractPath(const Variation *variations, size_t variationCount);
-
-        // Clean up per-glyph HarfBuzz resources (doesn't touch shared font)
         void destroy();
     };
 

@@ -6,6 +6,7 @@ extern "C" {
 void *malloc(unsigned long);
 void free(void *);
 void *realloc(void *, unsigned long);
+void *memcpy(void *, const void *, unsigned long);
 }
 
 // Direct constant definition to avoid including <cfloat>
@@ -26,7 +27,10 @@ namespace fontsubsetting {
     };
 
 // PathCommandArray implementation
-    PathCommandArray::PathCommandArray() : data(nullptr), size(0), capacity(0) {}
+    PathCommandArray::PathCommandArray() : data(nullptr), size(0), capacity(0) {
+        // Pre-allocate reasonable capacity for typical glyphs (avoids ~3-4 reallocs)
+        reserve(32);
+    }
 
     PathCommandArray::~PathCommandArray() {
         if (data) {
@@ -136,15 +140,28 @@ namespace fontsubsetting {
         ctx->commands->push_back(cmd);
     }
 
+    // Cached default language (avoids string parsing on every call)
+    static hb_language_t default_language = hb_language_from_string("en", -1);
+
     // SharedFontData implementation
     SharedFontData::SharedFontData()
-            : blob(nullptr), face(nullptr), prototypeFont(nullptr), upem(0) {}
+            : blob(nullptr), face(nullptr), prototypeFont(nullptr),
+              reusable_buffer(nullptr), draw_funcs(nullptr), upem(0) {}
 
     SharedFontData::~SharedFontData() {
         destroy();
     }
 
     void SharedFontData::destroy() {
+        // Clean up reusable resources
+        if (draw_funcs) {
+            hb_draw_funcs_destroy(draw_funcs);
+            draw_funcs = nullptr;
+        }
+        if (reusable_buffer) {
+            hb_buffer_destroy(reusable_buffer);
+            reusable_buffer = nullptr;
+        }
         if (prototypeFont) {
             hb_font_destroy(prototypeFont);
             prototypeFont = nullptr;
@@ -187,98 +204,49 @@ namespace fontsubsetting {
         // Get units per EM
         upem = hb_face_get_upem(face);
 
-        // Create prototype font (will be cloned per glyph if needed)
+        // Create prototype font (shared across all glyph extractions)
         prototypeFont = hb_font_create(face);
         if (!prototypeFont) {
             destroy();
             return false;
         }
 
-        return true;
-    }
-
-    // GlyphHandle implementation
-    GlyphHandle::GlyphHandle()
-            : sharedFont(nullptr), buffer(nullptr), draw_funcs(nullptr),
-              glyph_id(0), codepoint(0) {}
-
-    GlyphHandle::~GlyphHandle() {
-        destroy();
-    }
-
-    void GlyphHandle::destroy() {
-        if (draw_funcs) {
-            hb_draw_funcs_destroy(draw_funcs);
-            draw_funcs = nullptr;
-        }
-        if (buffer) {
-            hb_buffer_destroy(buffer);
-            buffer = nullptr;
-        }
-        // Don't touch sharedFont - we don't own it
-    }
-
-    bool GlyphHandle::initialize(SharedFontData *sharedFontData, unsigned int cp) {
-        if (!sharedFontData || !sharedFontData->prototypeFont) {
-            return false;
-        }
-
-        sharedFont = sharedFontData;
-        codepoint = cp;
-
-        // Create buffer for shaping (per-glyph, reusable)
-        buffer = hb_buffer_create();
-        if (!buffer) {
+        // Create reusable buffer (saves 1-2KB allocation per extraction)
+        reusable_buffer = hb_buffer_create();
+        if (!reusable_buffer) {
             destroy();
             return false;
         }
 
-        // Create draw funcs (per-glyph, reusable)
+        // Create reusable draw_funcs (saves ~300B + setup per extraction)
         draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
             destroy();
             return false;
         }
 
-        // Set callbacks on draw_funcs (only needs to be done once per glyph)
+        // Set up draw callbacks once (reused for all extractions)
         hb_draw_funcs_set_move_to_func(draw_funcs, move_to_func, nullptr, nullptr);
         hb_draw_funcs_set_line_to_func(draw_funcs, line_to_func, nullptr, nullptr);
         hb_draw_funcs_set_quadratic_to_func(draw_funcs, quadratic_to_func, nullptr, nullptr);
         hb_draw_funcs_set_cubic_to_func(draw_funcs, cubic_to_func, nullptr, nullptr);
         hb_draw_funcs_set_close_path_func(draw_funcs, close_path_func, nullptr, nullptr);
 
-        // Shape the glyph once to get the glyph ID (with default variations)
-        hb_buffer_clear_contents(buffer);
-        hb_buffer_add(buffer, codepoint, 0);
-        hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
-        hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
-        hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
-
-        hb_shape(sharedFont->prototypeFont, buffer, nullptr, 0);
-
-        // Get glyph info
-        unsigned int glyph_count;
-        hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buffer, &glyph_count);
-
-        if (glyph_count == 0 || !glyph_info) {
-            destroy();
-            return false;
-        }
-
-        // Store the glyph ID (may be substituted by RVRN in extractPath)
-        glyph_id = glyph_info[0].codepoint;
-
         return true;
     }
 
-    GlyphPath GlyphHandle::extractPath(const Variation *variations, size_t variationCount) {
+    GlyphPath SharedFontData::extractPathDirect(
+            unsigned int codepoint,
+            const Variation *variations,
+            size_t variationCount) {
+
         GlyphPath result;
 
-        if (!sharedFont || !glyph_id) {
+        if (!prototypeFont || !reusable_buffer || !draw_funcs) {
             return result;
         }
 
-        result.unitsPerEm = sharedFont->upem;
+        result.unitsPerEm = upem;
 
         // Apply variable font variations if provided
         if (variationCount > 0 && variations) {
@@ -296,43 +264,43 @@ namespace fontsubsetting {
                 hb_variations[i].value = variations[i].value;
             }
 
-            hb_font_set_variations(sharedFont->prototypeFont, hb_variations, actual_count);
+            hb_font_set_variations(prototypeFont, hb_variations, actual_count);
         } else {
             // Clear variations (set to defaults)
-            hb_font_set_variations(sharedFont->prototypeFont, nullptr, 0);
+            hb_font_set_variations(prototypeFont, nullptr, 0);
         }
 
-        // Re-shape with new variations to apply RVRN feature
-        hb_buffer_clear_contents(buffer);
-        hb_buffer_add(buffer, codepoint, 0);
-        hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
-        hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
-        hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
+        // Shape with variations to get correct glyph ID (applies RVRN feature)
+        // Reuse buffer instead of creating new one
+        hb_buffer_clear_contents(reusable_buffer);
+        hb_buffer_add(reusable_buffer, codepoint, 0);
+        hb_buffer_set_direction(reusable_buffer, HB_DIRECTION_LTR);
+        hb_buffer_set_script(reusable_buffer, HB_SCRIPT_COMMON);
+        hb_buffer_set_language(reusable_buffer, default_language);
 
-        hb_shape(sharedFont->prototypeFont, buffer, nullptr, 0);
+        hb_shape(prototypeFont, reusable_buffer, nullptr, 0);
 
-        // Get updated glyph ID (may change with variations)
+        // Get glyph ID after shaping
         unsigned int glyph_count;
-        hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buffer, &glyph_count);
+        hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(reusable_buffer, &glyph_count);
 
         if (glyph_count == 0 || !glyph_info) {
             return result;
         }
 
-        glyph_id = glyph_info[0].codepoint;
+        hb_codepoint_t glyph_id = glyph_info[0].codepoint;
 
         // Get glyph metrics
-        hb_position_t advance_width = hb_font_get_glyph_h_advance(sharedFont->prototypeFont,
-                                                                  glyph_id);
-        float scale = 1.0f / static_cast<float>(sharedFont->upem);
+        hb_position_t advance_width = hb_font_get_glyph_h_advance(prototypeFont, glyph_id);
+        float scale = 1.0f / static_cast<float>(upem);
         result.advanceWidth = static_cast<float>(advance_width) * scale;
 
         // Prepare context for path drawing
         PathDrawContext ctx;
         ctx.commands = &result.commands;
 
-        // Extract glyph outline
-        hb_font_draw_glyph(sharedFont->prototypeFont, glyph_id, draw_funcs, &ctx);
+        // Extract glyph outline using reusable draw_funcs
+        hb_font_draw_glyph(prototypeFont, glyph_id, draw_funcs, &ctx);
 
         // Scale all path coordinates to normalized space
         for (size_t i = 0; i < result.commands.size; i++) {

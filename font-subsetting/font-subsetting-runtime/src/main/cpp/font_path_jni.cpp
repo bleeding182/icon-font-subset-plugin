@@ -15,7 +15,7 @@ void *realloc(void *, size_t);
 struct NativeFontHandle {
     void *fontData;                                // Raw font file data
     size_t fontDataSize;                           // Size of font data
-    fontsubsetting::SharedFontData *sharedFont;    // Shared HarfBuzz objects (blob, face, font)
+    fontsubsetting::SharedFontData *sharedFont;    // Shared HarfBuzz objects (blob, face, font, buffer, draw_funcs)
 };
 
 // Helper function to convert integer tag to 4-byte tag string
@@ -155,14 +155,12 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
 
-    // Create temporary glyph handle using shared font data
-    fontsubsetting::GlyphHandle glyphHandle;
-    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
-        return nullptr;
-    }
-
-    // Extract path with no variations
-    auto glyphPath = glyphHandle.extractPath(nullptr, 0);
+    // Direct extraction without creating temporary GlyphHandle
+    auto glyphPath = handle->sharedFont->extractPathDirect(
+            static_cast<unsigned int>(codepoint),
+            nullptr,
+            0
+    );
 
     if (glyphPath.isEmpty()) {
         return nullptr;
@@ -186,18 +184,17 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
 
-    // Create temporary glyph handle using shared font data
-    fontsubsetting::GlyphHandle glyphHandle;
-    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
-        return nullptr;
-    }
-
-    // Single axis variation
+    // Single axis variation - stack allocated
     fontsubsetting::Variation variations[1];
     intToTag(tag1, variations[0].tag);
     variations[0].value = value1;
 
-    auto glyphPath = glyphHandle.extractPath(variations, 1);
+    // Direct extraction using shared resources
+    auto glyphPath = handle->sharedFont->extractPathDirect(
+            static_cast<unsigned int>(codepoint),
+            variations,
+            1
+    );
 
     if (glyphPath.isEmpty()) {
         return nullptr;
@@ -223,20 +220,19 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
 
-    // Create temporary glyph handle using shared font data
-    fontsubsetting::GlyphHandle glyphHandle;
-    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
-        return nullptr;
-    }
-
-    // Two axis variations
+    // Two axis variations - stack allocated
     fontsubsetting::Variation variations[2];
     intToTag(tag1, variations[0].tag);
     variations[0].value = value1;
     intToTag(tag2, variations[1].tag);
     variations[1].value = value2;
 
-    auto glyphPath = glyphHandle.extractPath(variations, 2);
+    // Direct extraction using shared resources
+    auto glyphPath = handle->sharedFont->extractPathDirect(
+            static_cast<unsigned int>(codepoint),
+            variations,
+            2
+    );
 
     if (glyphPath.isEmpty()) {
         return nullptr;
@@ -264,13 +260,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
 
-    // Create temporary glyph handle using shared font data
-    fontsubsetting::GlyphHandle glyphHandle;
-    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
-        return nullptr;
-    }
-
-    // Three axis variations
+    // Three axis variations - stack allocated
     fontsubsetting::Variation variations[3];
     intToTag(tag1, variations[0].tag);
     variations[0].value = value1;
@@ -279,7 +269,12 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
     intToTag(tag3, variations[2].tag);
     variations[2].value = value3;
 
-    auto glyphPath = glyphHandle.extractPath(variations, 3);
+    // Direct extraction using shared resources
+    auto glyphPath = handle->sharedFont->extractPathDirect(
+            static_cast<unsigned int>(codepoint),
+            variations,
+            3
+    );
 
     if (glyphPath.isEmpty()) {
         return nullptr;
@@ -302,12 +297,6 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
     }
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
-
-    // Create temporary glyph handle using shared font data
-    fontsubsetting::GlyphHandle glyphHandle;
-    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
-        return nullptr;
-    }
 
     // Parse variations - stack allocate, max 16 variations
     fontsubsetting::Variation variations[16];
@@ -332,7 +321,12 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
         }
     }
 
-    auto glyphPath = glyphHandle.extractPath(variations, variationCount);
+    // Direct extraction using shared resources
+    auto glyphPath = handle->sharedFont->extractPathDirect(
+            static_cast<unsigned int>(codepoint),
+            variations,
+            variationCount
+    );
 
     if (glyphPath.isEmpty()) {
         return nullptr;
