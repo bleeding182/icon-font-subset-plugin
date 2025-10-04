@@ -143,290 +143,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeDestroyFon
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPath(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong fontPtr,
-        jint codepoint) {
-
-    if (fontPtr == 0) {
-        return nullptr;
-    }
-
-    NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
-
-    // Extract glyph path using raw font data for convenience JNI methods
-    auto glyphPath = fontsubsetting::extractGlyphPath(
-            handle->fontData,
-            handle->fontDataSize,
-            static_cast<unsigned int>(codepoint)
-    );
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathWithVariations(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong fontPtr,
-        jint codepoint,
-        jintArray variationTags,
-        jfloatArray variationValues) {
-
-    if (fontPtr == 0) {
-        return nullptr;
-    }
-
-    NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
-
-    // Parse variations - stack allocate, max 16 variations
-    fontsubsetting::Variation variations[16];
-    size_t variationCount = 0;
-
-    if (variationTags && variationValues) {
-        jsize tagCount = env->GetArrayLength(variationTags);
-        jsize valueCount = env->GetArrayLength(variationValues);
-
-        if (tagCount == valueCount && tagCount > 0) {
-            jint *tags = env->GetIntArrayElements(variationTags, nullptr);
-            jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
-            variationCount = tagCount > 16 ? 16 : tagCount;  // Limit to 16
-
-            for (size_t i = 0; i < variationCount; i++) {
-                intToTag(tags[i], variations[i].tag);
-                variations[i].value = values[i];
-            }
-
-            env->ReleaseIntArrayElements(variationTags, tags, JNI_ABORT);
-            env->ReleaseFloatArrayElements(variationValues, values, JNI_ABORT);
-        }
-    }
-
-    // Extract glyph path with variations using raw font data for convenience JNI methods
-    auto glyphPath = fontsubsetting::extractGlyphPathWithVariations(
-            handle->fontData,
-            handle->fontDataSize,
-            static_cast<unsigned int>(codepoint),
-            variations,
-            variationCount
-    );
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jlong JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeCreateGlyphHandle(
-        JNIEnv* /* env */,
-        jobject /* this */,
-        jlong fontPtr,
-        jint codepoint) {
-
-    if (fontPtr == 0) {
-        return 0;
-    }
-
-    NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
-
-    auto* glyphHandle = new fontsubsetting::GlyphHandle();
-    if (!glyphHandle->initialize(handle->sharedFont,
-                                 static_cast<unsigned int>(codepoint))) {
-        delete glyphHandle;
-        return 0;
-    }
-
-    return reinterpret_cast<jlong>(glyphHandle);
-}
-
-JNIEXPORT void JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeDestroyGlyphHandle(
-        JNIEnv* /* env */,
-        jobject /* this */,
-        jlong glyphHandlePtr) {
-
-    if (glyphHandlePtr == 0) {
-        return;
-    }
-
-    auto* glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle*>(glyphHandlePtr);
-    delete glyphHandle;
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong glyphHandlePtr,
-        jintArray variationTags,
-        jfloatArray variationValues) {
-
-    if (glyphHandlePtr == 0) {
-        return nullptr;
-    }
-
-    auto* glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle*>(glyphHandlePtr);
-
-    fontsubsetting::Variation variations[16];
-    size_t variationCount = 0;
-
-    if (variationTags && variationValues) {
-        jsize tagCount = env->GetArrayLength(variationTags);
-        jsize valueCount = env->GetArrayLength(variationValues);
-
-        if (tagCount == valueCount && tagCount > 0) {
-            jint *tags = env->GetIntArrayElements(variationTags, nullptr);
-            jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
-            variationCount = tagCount > 16 ? 16 : tagCount;
-
-            for (size_t i = 0; i < variationCount; i++) {
-                intToTag(tags[i], variations[i].tag);
-                variations[i].value = values[i];
-            }
-
-            env->ReleaseIntArrayElements(variationTags, tags, JNI_ABORT);
-            env->ReleaseFloatArrayElements(variationValues, values, JNI_ABORT);
-        }
-    }
-
-    auto glyphPath = glyphHandle->extractPath(variations, variationCount);
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle0(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong glyphHandlePtr) {
-
-    if (glyphHandlePtr == 0) {
-        return nullptr;
-    }
-
-    auto *glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle *>(glyphHandlePtr);
-
-    // No variations - static glyph
-    auto glyphPath = glyphHandle->extractPath(nullptr, 0);
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle1(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong glyphHandlePtr,
-        jint tag1,
-        jfloat value1) {
-
-    if (glyphHandlePtr == 0) {
-        return nullptr;
-    }
-
-    auto *glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle *>(glyphHandlePtr);
-
-    // Single axis variation
-    fontsubsetting::Variation variations[1];
-    intToTag(tag1, variations[0].tag);
-    variations[0].value = value1;
-
-    auto glyphPath = glyphHandle->extractPath(variations, 1);
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle2(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong glyphHandlePtr,
-        jint tag1,
-        jfloat value1,
-        jint tag2,
-        jfloat value2) {
-
-    if (glyphHandlePtr == 0) {
-        return nullptr;
-    }
-
-    auto *glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle *>(glyphHandlePtr);
-
-    // Two axis variations
-    fontsubsetting::Variation variations[2];
-    intToTag(tag1, variations[0].tag);
-    variations[0].value = value1;
-    intToTag(tag2, variations[1].tag);
-    variations[1].value = value2;
-
-    auto glyphPath = glyphHandle->extractPath(variations, 2);
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle3(
-        JNIEnv *env,
-        jobject /* this */,
-        jlong glyphHandlePtr,
-        jint tag1,
-        jfloat value1,
-        jint tag2,
-        jfloat value2,
-        jint tag3,
-        jfloat value3) {
-
-    if (glyphHandlePtr == 0) {
-        return nullptr;
-    }
-
-    auto *glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle *>(glyphHandlePtr);
-
-    // Three axis variations
-    fontsubsetting::Variation variations[3];
-    intToTag(tag1, variations[0].tag);
-    variations[0].value = value1;
-    intToTag(tag2, variations[1].tag);
-    variations[1].value = value2;
-    intToTag(tag3, variations[2].tag);
-    variations[2].value = value3;
-
-    auto glyphPath = glyphHandle->extractPath(variations, 3);
-
-    if (glyphPath.isEmpty()) {
-        return nullptr;
-    }
-
-    return packGlyphPathToArray(env, glyphPath);
-}
-
-// New direct extraction methods that use SharedFontData (simpler, no per-glyph handle management)
-
-JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect0(
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPath0(
         JNIEnv *env,
         jobject /* this */,
         jlong fontPtr,
@@ -455,7 +172,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect1(
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPath1(
         JNIEnv *env,
         jobject /* this */,
         jlong fontPtr,
@@ -490,7 +207,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect2(
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPath2(
         JNIEnv *env,
         jobject /* this */,
         jlong fontPtr,
@@ -529,7 +246,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect3(
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPath3(
         JNIEnv *env,
         jobject /* this */,
         jlong fontPtr,
@@ -572,7 +289,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
 }
 
 JNIEXPORT jfloatArray JNICALL
-Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirectN(
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPathN(
         JNIEnv *env,
         jobject /* this */,
         jlong fontPtr,

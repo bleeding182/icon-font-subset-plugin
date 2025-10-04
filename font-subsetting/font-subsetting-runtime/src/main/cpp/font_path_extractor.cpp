@@ -419,34 +419,4 @@ namespace fontsubsetting {
         return result;
     }
 
-    GlyphPath extractGlyphPath(const void *fontData, size_t fontDataSize, unsigned int codepoint) {
-        return extractGlyphPathWithVariations(fontData, fontDataSize, codepoint, nullptr, 0);
-    }
-
-    GlyphPath extractGlyphPathWithVariations(
-            const void *fontData,
-            size_t fontDataSize,
-            unsigned int codepoint,
-            const Variation *variations,
-            size_t variationCount
-    ) {
-        GlyphPath result;
-
-        if (!fontData || fontDataSize == 0) {
-            return result;
-        }
-
-        SharedFontData sharedData;
-        if (!sharedData.initialize(fontData, fontDataSize)) {
-            return result;
-        }
-
-        GlyphHandle glyphHandle;
-        if (!glyphHandle.initialize(&sharedData, codepoint)) {
-            return result;
-        }
-
-        return glyphHandle.extractPath(variations, variationCount);
-    }
-
 } // namespace fontsubsetting

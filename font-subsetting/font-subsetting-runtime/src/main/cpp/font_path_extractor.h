@@ -109,34 +109,6 @@ namespace fontsubsetting {
         void destroy();
     };
 
-    /**
- * Extracts the path data for a specific glyph from a font.
- * 
- * @param fontData The font file data
- * @param fontDataSize Size of font data in bytes
- * @param codepoint Unicode codepoint of the glyph
- * @return GlyphPath containing the path commands, or empty if failed
- */
-    GlyphPath extractGlyphPath(const void *fontData, size_t fontDataSize, unsigned int codepoint);
-
-/**
- * Extracts the path data for a specific glyph from a variable font with axis variations.
- * 
- * @param fontData The font file data
- * @param fontDataSize Size of font data in bytes
- * @param codepoint Unicode codepoint of the glyph
- * @param variations Array of variation key-value pairs
- * @param variationCount Number of variations
- * @return GlyphPath containing the path commands, or empty if failed
- */
-    GlyphPath extractGlyphPathWithVariations(
-            const void *fontData,
-            size_t fontDataSize,
-            unsigned int codepoint,
-            const Variation *variations,
-            size_t variationCount
-    );
-
 } // namespace fontsubsetting
 
 #endif // FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H

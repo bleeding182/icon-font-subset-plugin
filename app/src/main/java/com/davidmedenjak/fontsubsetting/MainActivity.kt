@@ -3,20 +3,18 @@ package com.davidmedenjak.fontsubsetting
 /**
  * Font Subsetting Demo - Variable Font Animation Performance
  *
- * ## JNI Optimization for Variable Fonts
+ * ## Optimizations for Variable Font JNI Overhead
  *
- * This demo animates 20 icons at 60fps with variable font axes (FILL and GRAD).
- * Without optimization, this would require 1200 expensive JNI operations per second:
- * - Create HarfBuzz blob, face, font, buffer, draw_funcs
- * - Extract path
- * - Destroy all objects
+ * Animating variable font axes (FILL, GRAD) at 60fps across many icons creates heavy JNI workload,
+ * requiring repeated creation and disposal of HarfBuzz objects for each glyph and frame.
  *
- * **Optimization**: GlyphHandle caching
- * - Each glyph creates a native GlyphHandle once (caches HarfBuzz objects)
- * - Axis updates only modify variations and re-extract the path
- * - Handle is destroyed when the Composable leaves the composition
+ * **Key architectural improvements:**
+ * - Temporary, reusable GlyphHandles cache HarfBuzz state per glyph.
+ * - Only axis values are updated on each animation frame; all other objects are reused.
+ * - SharedFontData enables efficient memory use across the app.
+ * - Kotlin-side caching minimizes redundant path extraction and recomputation.
  *
- * This reduces JNI overhead by ~10x, making smooth 60fps animations possible.
+ * These strategies drastically reduce JNI overhead and enable smooth 60fps variable font animations.
  */
 
 import android.os.Bundle

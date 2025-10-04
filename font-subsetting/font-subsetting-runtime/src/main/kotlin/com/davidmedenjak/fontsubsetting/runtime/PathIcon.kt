@@ -405,13 +405,13 @@ class GlyphState internal constructor(
             val newRawData = when (axes.size) {
                 0 -> {
                     // No axes - static glyph (zero allocation)
-                    extractor.extractGlyphPathDirect(codepoint)
+                    extractor.extractPath(codepoint)
                 }
 
                 1 -> {
                     // Single axis (zero allocation)
                     val (tag, value) = axes.entries.first()
-                    extractor.extractGlyphPathDirect1(codepoint, tag, value)
+                    extractor.extractPath1(codepoint, tag, value)
                 }
 
                 2 -> {
@@ -419,9 +419,7 @@ class GlyphState internal constructor(
                     val iter = axes.entries.iterator()
                     val (tag1, value1) = iter.next()
                     val (tag2, value2) = iter.next()
-                    extractor.extractGlyphPathDirect2(
-                        codepoint, tag1, value1, tag2, value2
-                    )
+                    extractor.extractPath2(codepoint, tag1, value1, tag2, value2)
                 }
 
                 3 -> {
@@ -430,16 +428,14 @@ class GlyphState internal constructor(
                     val (tag1, value1) = iter.next()
                     val (tag2, value2) = iter.next()
                     val (tag3, value3) = iter.next()
-                    extractor.extractGlyphPathDirect3(
-                        codepoint, tag1, value1, tag2, value2, tag3, value3
-                    )
+                    extractor.extractPath3(codepoint, tag1, value1, tag2, value2, tag3, value3)
                 }
 
                 else -> {
                     // 4+ axes (rare, fallback to array allocation)
                     val tags = axes.keys.toIntArray()
                     val values = axes.values.toFloatArray()
-                    extractor.extractGlyphPathDirectN(codepoint, tags, values)
+                    extractor.extractPathN(codepoint, tags, values)
                 }
             } ?: return false
 
