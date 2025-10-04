@@ -34,10 +34,9 @@ namespace fontsubsetting {
 
         void clear();
 
-        bool empty() const { return size == 0; }
-
-    private:
         void reserve(size_t new_capacity);
+
+        bool empty() const { return size == 0; }
     };
 
     // Simple key-value pair for variations (replaces std::map)

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <cfloat>
+#include <algorithm>
 
 #define LOG_TAG "FontPathExtractor"
 
@@ -45,7 +47,6 @@ namespace fontsubsetting {
 // Context for path drawing callbacks
     struct PathDrawContext {
         PathCommandArray *commands;
-        float scale;
     };
 
 // PathCommandArray implementation
@@ -55,10 +56,10 @@ namespace fontsubsetting {
         if (data) {
             free(data);
             data = nullptr;
+        }
+        size = 0;
+        capacity = 0;
     }
-    size = 0;
-    capacity = 0;
-}
 
     void PathCommandArray::reserve(size_t new_capacity) {
         if (new_capacity <= capacity) return;
@@ -67,10 +68,10 @@ namespace fontsubsetting {
         if (!new_data) {
             LOGE("Failed to allocate memory for path commands");
             return;
+        }
+        data = new_data;
+        capacity = new_capacity;
     }
-    data = new_data;
-    capacity = new_capacity;
-}
 
     void PathCommandArray::push_back(const PathCommand &cmd) {
         if (size >= capacity) {
@@ -93,7 +94,7 @@ namespace fontsubsetting {
 
     GlyphPath::~GlyphPath() {}
 
-// HarfBuzz draw callbacks
+// HarfBuzz draw callbacks - store coordinates in font units
     static void move_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                              hb_draw_state_t * /*st*/,
                              float to_x, float to_y,
@@ -101,8 +102,8 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::MOVE_TO;
-        cmd.x1 = to_x * ctx->scale;
-        cmd.y1 = to_y * ctx->scale;
+        cmd.x1 = to_x;
+        cmd.y1 = to_y;
         ctx->commands->push_back(cmd);
     }
 
@@ -113,8 +114,8 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::LINE_TO;
-        cmd.x1 = to_x * ctx->scale;
-        cmd.y1 = to_y * ctx->scale;
+        cmd.x1 = to_x;
+        cmd.y1 = to_y;
         ctx->commands->push_back(cmd);
     }
 
@@ -123,15 +124,15 @@ namespace fontsubsetting {
                               float control_x, float control_y,
                               float to_x, float to_y,
                               void * /*user_data*/) {
-    auto *ctx = static_cast<PathDrawContext *>(draw_data);
-    PathCommand cmd;
-    cmd.type = PathCommand::QUADRATIC_TO;
-    cmd.x1 = control_x * ctx->scale;
-    cmd.y1 = control_y * ctx->scale;
-    cmd.x2 = to_x * ctx->scale;
-    cmd.y2 = to_y * ctx->scale;
-    ctx->commands->push_back(cmd);
-}
+        auto *ctx = static_cast<PathDrawContext *>(draw_data);
+        PathCommand cmd;
+        cmd.type = PathCommand::QUADRATIC_TO;
+        cmd.x1 = control_x;
+        cmd.y1 = control_y;
+        cmd.x2 = to_x;
+        cmd.y2 = to_y;
+        ctx->commands->push_back(cmd);
+    }
 
     static void cubic_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                               hb_draw_state_t * /*st*/,
@@ -142,12 +143,12 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::CUBIC_TO;
-        cmd.x1 = control1_x * ctx->scale;
-        cmd.y1 = control1_y * ctx->scale;
-        cmd.x2 = control2_x * ctx->scale;
-        cmd.y2 = control2_y * ctx->scale;
-        cmd.x3 = to_x * ctx->scale;
-        cmd.y3 = to_y * ctx->scale;
+        cmd.x1 = control1_x;
+        cmd.y1 = control1_y;
+        cmd.x2 = control2_x;
+        cmd.y2 = control2_y;
+        cmd.x3 = to_x;
+        cmd.y3 = to_y;
         ctx->commands->push_back(cmd);
     }
 
@@ -203,7 +204,7 @@ namespace fontsubsetting {
         }
         HBFaceDeleter face_deleter;
 
-        // Get units per EM for scaling
+        // Get units per EM - this is our coordinate system
         unsigned int upem = hb_face_get_upem(face);
         result.unitsPerEm = static_cast<int>(upem);
 
@@ -216,24 +217,22 @@ namespace fontsubsetting {
         }
         HBFontDeleter font_deleter;
 
-        // Apply variable font variations if any
+        // Apply variable font variations if provided
         if (variationCount > 0 && variations) {
-            // Stack allocate for reasonable number of variations (usually 1-3)
+            // Stack allocate for reasonable number of variations (up to 16)
             hb_variation_t hb_variations[16];
             size_t actual_count = variationCount > 16 ? 16 : variationCount;
 
             for (size_t i = 0; i < actual_count; i++) {
-                hb_variation_t var;
                 const char *tag_str = variations[i].tag;
                 // Convert tag string to HarfBuzz tag (4-byte code)
-                var.tag = HB_TAG(
+                hb_variations[i].tag = HB_TAG(
                         tag_str[0] ? tag_str[0] : ' ',
                         tag_str[1] ? tag_str[1] : ' ',
                         tag_str[2] ? tag_str[2] : ' ',
                         tag_str[3] ? tag_str[3] : ' '
                 );
-                var.value = variations[i].value;
-                hb_variations[i] = var;
+                hb_variations[i].value = variations[i].value;
 
                 LOGD("Applying variation: %s = %.2f", tag_str, variations[i].value);
             }
@@ -250,35 +249,16 @@ namespace fontsubsetting {
             return result;
         }
 
-        // Get glyph advance metrics
+        // Get glyph metrics (in font units)
         hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
         hb_position_t advance_height = hb_font_get_glyph_v_advance(font, glyph_id);
 
-        // Scale to normalized coordinates (0-1 range based on upem)
+        // Normalize to 0-1 range based on upem
         float scale = 1.0f / static_cast<float>(upem);
         result.advanceWidth = static_cast<float>(advance_width) * scale;
         result.advanceHeight = static_cast<float>(advance_height) * scale;
 
-        // Get glyph extents (bounding box)
-        hb_glyph_extents_t extents;
-        if (hb_font_get_glyph_extents(font, glyph_id, &extents)) {
-            result.minX = static_cast<float>(extents.x_bearing) * scale;
-            result.minY = static_cast<float>(extents.y_bearing + extents.height) * scale;
-            result.maxX = static_cast<float>(extents.x_bearing + extents.width) * scale;
-            result.maxY = static_cast<float>(extents.y_bearing) * scale;
-
-            LOGD("Glyph extents: minX=%.3f, minY=%.3f, maxX=%.3f, maxY=%.3f",
-                 result.minX, result.minY, result.maxX, result.maxY);
-        } else {
-            // Fallback: use default values
-            result.minX = 0.0f;
-            result.minY = 0.0f;
-            result.maxX = result.advanceWidth;
-            result.maxY = 1.0f;
-            LOGD("Failed to get glyph extents, using defaults");
-        }
-
-        // Create draw funcs
+        // Create draw funcs for path extraction
         hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
             LOGE("Failed to create draw funcs");
@@ -294,13 +274,106 @@ namespace fontsubsetting {
         hb_draw_funcs_set_cubic_to_func(draw_funcs, cubic_to_func, nullptr, nullptr);
         hb_draw_funcs_set_close_path_func(draw_funcs, close_path_func, nullptr, nullptr);
 
-        // Prepare context for drawing
+        // Prepare context for path drawing
         PathDrawContext ctx;
         ctx.commands = &result.commands;
-        ctx.scale = scale;
 
-        // Extract glyph outline
-        hb_font_get_glyph_shape(font, glyph_id, draw_funcs, &ctx);
+        // Extract glyph outline - coordinates will be in font units
+        hb_font_draw_glyph(font, glyph_id, draw_funcs, &ctx);
+
+        LOGD("Extracted %zu path commands from glyph %u", result.commands.size, glyph_id);
+
+        // Scale all path coordinates to normalized space
+        for (size_t i = 0; i < result.commands.size; i++) {
+            PathCommand &cmd = result.commands.data[i];
+
+            // Scale based on command type
+            switch (cmd.type) {
+                case PathCommand::MOVE_TO:
+                case PathCommand::LINE_TO:
+                    cmd.x1 *= scale;
+                    cmd.y1 *= scale;
+                    break;
+
+                case PathCommand::QUADRATIC_TO:
+                    cmd.x1 *= scale;
+                    cmd.y1 *= scale;
+                    cmd.x2 *= scale;
+                    cmd.y2 *= scale;
+                    break;
+
+                case PathCommand::CUBIC_TO:
+                    cmd.x1 *= scale;
+                    cmd.y1 *= scale;
+                    cmd.x2 *= scale;
+                    cmd.y2 *= scale;
+                    cmd.x3 *= scale;
+                    cmd.y3 *= scale;
+                    break;
+
+                case PathCommand::CLOSE:
+                    // No coordinates to scale
+                    break;
+            }
+        }
+
+        // Calculate bounding box from path coordinates
+        // Note: This uses control points, which gives a conservative (possibly loose) bound
+        // The actual Bezier curves may not reach all control points, but will never exceed them
+        float pathMinX = FLT_MAX, pathMinY = FLT_MAX, pathMaxX = -FLT_MAX, pathMaxY = -FLT_MAX;
+        for (size_t i = 0; i < result.commands.size; i++) {
+            PathCommand &cmd = result.commands.data[i];
+
+            // Update bounds based on command type
+            switch (cmd.type) {
+                case PathCommand::MOVE_TO:
+                case PathCommand::LINE_TO:
+                    pathMinX = std::min(pathMinX, cmd.x1);
+                    pathMinY = std::min(pathMinY, cmd.y1);
+                    pathMaxX = std::max(pathMaxX, cmd.x1);
+                    pathMaxY = std::max(pathMaxY, cmd.y1);
+                    break;
+
+                case PathCommand::QUADRATIC_TO:
+                    pathMinX = std::min(pathMinX, cmd.x1);
+                    pathMinY = std::min(pathMinY, cmd.y1);
+                    pathMaxX = std::max(pathMaxX, cmd.x1);
+                    pathMaxY = std::max(pathMaxY, cmd.y1);
+                    pathMinX = std::min(pathMinX, cmd.x2);
+                    pathMinY = std::min(pathMinY, cmd.y2);
+                    pathMaxX = std::max(pathMaxX, cmd.x2);
+                    pathMaxY = std::max(pathMaxY, cmd.y2);
+                    break;
+
+                case PathCommand::CUBIC_TO:
+                    pathMinX = std::min(pathMinX, cmd.x1);
+                    pathMinY = std::min(pathMinY, cmd.y1);
+                    pathMaxX = std::max(pathMaxX, cmd.x1);
+                    pathMaxY = std::max(pathMaxY, cmd.y1);
+                    pathMinX = std::min(pathMinX, cmd.x2);
+                    pathMinY = std::min(pathMinY, cmd.y2);
+                    pathMaxX = std::max(pathMaxX, cmd.x2);
+                    pathMaxY = std::max(pathMaxY, cmd.y2);
+                    pathMinX = std::min(pathMinX, cmd.x3);
+                    pathMinY = std::min(pathMinY, cmd.y3);
+                    pathMaxX = std::max(pathMaxX, cmd.x3);
+                    pathMaxY = std::max(pathMaxY, cmd.y3);
+                    break;
+
+                case PathCommand::CLOSE:
+                    // No coordinates to update bounds
+                    break;
+            }
+        }
+
+        // Use path-calculated bounds (conservative but always correct)
+        result.minX = pathMinX;
+        result.minY = pathMinY;
+        result.maxX = pathMaxX;
+        result.maxY = pathMaxY;
+
+        LOGD("Bounding box from path control points: minX=%.3f, minY=%.3f, maxX=%.3f, maxY=%.3f",
+             result.minX, result.minY, result.maxX, result.maxY);
 
         // Clean up
         hb_draw_funcs_destroy(draw_funcs);
