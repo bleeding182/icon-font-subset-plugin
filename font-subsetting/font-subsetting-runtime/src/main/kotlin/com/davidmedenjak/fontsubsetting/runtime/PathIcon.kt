@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.scale
@@ -25,13 +24,14 @@ import androidx.compose.ui.unit.dp
  * # Font Subsetting Runtime - Compose API
  *
  * This module provides an efficient way to render font glyphs as vector paths in Jetpack Compose.
- * The API is built around two main composables:
+ * The API is built around two main composables with a clean layered architecture:
  *
  * ## Core API
  *
  * ### `rememberGlyph()` - Create and cache glyph state
- * Creates a [GlyphState] instance that holds a single reusable Compose [Path]. The path is
- * efficiently updated (rewind + refill directly from native code) when variable font axes change.
+ * Creates a [GlyphState] instance that manages:
+ * - A single reusable Compose [Path] (Layer 1: PathData)
+ * - Variable font axis configuration (Layer 2: GlyphState)
  *
  * ### `Glyph()` - Render the glyph
  * Renders a [GlyphState] as a vector icon with proper scaling and centering.
@@ -52,36 +52,67 @@ import androidx.compose.ui.unit.dp
  *
  * ## Variable Font Animation
  *
- * The API automatically handles path updates when axes change:
+ * The improved API provides multiple ways to animate axes:
  *
+ * ### Option 1: Pass axes to rememberGlyph (reactive)
  * ```kotlin
- * val infiniteTransition = rememberInfiniteTransition()
- * val fillValue by infiniteTransition.animateFloat(
- *     initialValue = 0f,
- *     targetValue = 1f,
- *     animationSpec = infiniteRepeatable(
- *         animation = tween(durationMillis = 1500),
- *         repeatMode = RepeatMode.Reverse
- *     )
- * )
- *
- * // Path is automatically refilled when fillValue changes
+ * val fillValue by animateFloatAsState(targetValue = 1f)
  * val glyph = rememberGlyph(
  *     extractor = extractor,
  *     char = '★',
- *     axes = mapOf("FILL" to fillValue, "wght" to 400f)
+ *     axes = mapOf("FILL" to fillValue)
  * )
+ * ```
+ *
+ * ### Option 2: Manipulate GlyphState directly (imperative)
+ * ```kotlin
+ * val glyph = rememberGlyph(extractor, '★')
  * glyph?.let {
+ *     // Animate individual axes
+ *     LaunchedEffect(fillValue) {
+ *         it.updateAxes { put("FILL", fillValue) }
+ *     }
+ *
+ *     // Or update multiple axes at once
+ *     it.updateAxes {
+ *         put("FILL", 1f)
+ *         put("wght", 700f)
+ *     }
+ *
+ *     // Or replace all axes (clear + set)
+ *     it.updateAxes {
+ *         clear()
+ *         put("FILL", 0f)
+ *         put("wght", 300f)
+ *     }
+ *
  *     Glyph(it, size = 48.dp, tint = Color.Red)
  * }
  * ```
  *
+ * ## Architecture
+ *
+ * The implementation uses a clean two-layer architecture:
+ *
+ * **Layer 1: PathData** (internal)
+ * - Manages a single Compose Path and glyph metrics
+ * - Handles path reuse with rewind()
+ * - Parses raw native data and fills path directly
+ * - Agnostic to variable font axes
+ *
+ * **Layer 2: GlyphState** (public)
+ * - Manages variable font axis configuration
+ * - Provides clean API for axis manipulation
+ * - Delegates path updates to PathData
+ * - Handles native code interaction
+ *
  * ## Performance Characteristics
  *
- * - **Single Path**: Only one Compose [Path] object, no intermediate allocations
- * - **Direct JNI Calls**: Native code fills the Path directly via callbacks
- * - **Efficient Updates**: Uses [Path.rewind()] + direct native fill
- * - **Smart Caching**: [GlyphState] is remembered per extractor + codepoint
+ * - **Single Path**: Only one Compose [Path] object per glyph
+ * - **No Intermediate Objects**: Direct parsing into path operations
+ * - **Efficient Updates**: Uses [Path.rewind()] for axis changes
+ * - **Smart Caching**: [GlyphState] remembered per extractor + codepoint
+ * - **Clean Separation**: Independent layers for path and axis management
  *
  * @see rememberGlyph
  * @see Glyph
@@ -89,6 +120,8 @@ import androidx.compose.ui.unit.dp
  */
 
 /**
+ * Layer 2: Glyph State with Axis Management
+ *
  * Represents a glyph with a single cached Compose Path and metrics.
  * The path is reused and refilled directly from native code when axis values change.
  */
@@ -97,49 +130,154 @@ class GlyphState internal constructor(
     private val extractor: FontPathExtractor,
     private val codepoint: Int
 ) {
-    internal val path = Path().apply {
-        fillType = PathFillType.EvenOdd
-    }
+    // Layer 1: Path and metadata management
+    private val pathData = PathData()
 
-    var advanceWidth: Float = 0f
-        internal set
-    var advanceHeight: Float = 0f
-        internal set
-    var unitsPerEm: Int = 0
-        internal set
-    var minX: Float = 0f
-        internal set
-    var minY: Float = 0f
-        internal set
-    var maxX: Float = 0f
-        internal set
-    var maxY: Float = 0f
-        internal set
+    // Layer 2: Axis configuration management
+    private val axes = mutableMapOf<String, Float>()
 
     /**
      * Width of the glyph bounding box
      */
-    val width: Float get() = maxX - minX
+    val width: Float get() = pathData.width
 
     /**
      * Height of the glyph bounding box
      */
-    val height: Float get() = maxY - minY
+    val height: Float get() = pathData.height
+
+    /**
+     * Advance width for text layout
+     */
+    val advanceWidth: Float get() = pathData.advanceWidth
+
+    /**
+     * Advance height for text layout
+     */
+    val advanceHeight: Float get() = pathData.advanceHeight
+
+    /**
+     * Units per EM from the font
+     */
+    val unitsPerEm: Int get() = pathData.unitsPerEm
+
+    /**
+     * Minimum X coordinate of the glyph bounds
+     */
+    val minX: Float get() = pathData.minX
+
+    /**
+     * Minimum Y coordinate of the glyph bounds
+     */
+    val minY: Float get() = pathData.minY
+
+    /**
+     * Maximum X coordinate of the glyph bounds
+     */
+    val maxX: Float get() = pathData.maxX
+
+    /**
+     * Maximum Y coordinate of the glyph bounds
+     */
+    val maxY: Float get() = pathData.maxY
 
     /**
      * The Compose path for this glyph
      */
-    internal val composePath: Path get() = path
+    internal val composePath: Path get() = pathData.composePath
 
     /**
-     * Updates the glyph path with the given axis variations.
-     * Rewinds the path and fills it directly from native data.
+     * Sets a single axis value and updates the path.
+     * This is useful for animating individual axes.
      *
-     * @param axes Map of axis tag (e.g., "FILL", "wght") to value
+     * @param axis Axis tag (e.g., "FILL", "wght")
+     * @param value Axis value
      * @return true if successful, false if glyph not found
      */
-    fun updateAxes(axes: Map<String, Float>): Boolean {
-        return updateGlyphPath(this, extractor, codepoint, axes)
+    fun setAxis(axis: String, value: Float): Boolean {
+        axes[axis] = value
+        return updatePath()
+    }
+
+    /**
+     * Sets multiple axis values and updates the path.
+     * This replaces all current axis values.
+     *
+     * @param newAxes Map of axis tags to values
+     * @return true if successful, false if glyph not found
+     */
+    fun setAxes(newAxes: Map<String, Float>): Boolean {
+        axes.clear()
+        axes.putAll(newAxes)
+        return updatePath()
+    }
+
+    /**
+     * Updates the axes using a lambda receiver.
+     * This is useful for updating multiple axes at once without allocating intermediate maps.
+     *
+     * @param block Lambda with the axes map as receiver
+     * @return true if successful, false if glyph not found
+     */
+    fun updateAxes(block: MutableMap<String, Float>.() -> Unit): Boolean {
+        axes.apply(block)
+        return updatePath()
+    }
+
+    /**
+     * Removes an axis value and updates the path.
+     *
+     * @param axis Axis tag to remove
+     * @return true if successful, false if glyph not found
+     */
+    fun removeAxis(axis: String): Boolean {
+        axes.remove(axis)
+        return updatePath()
+    }
+
+    /**
+     * Clears all axis values and updates the path to default.
+     *
+     * @return true if successful, false if glyph not found
+     */
+    fun clearAxes(): Boolean {
+        axes.clear()
+        return updatePath()
+    }
+
+    /**
+     * Gets the current axis values.
+     */
+    fun getAxes(): Map<String, Float> = axes.toMap()
+
+    /**
+     * Updates the glyph path with the current axis configuration.
+     * Internal method that fetches raw data and delegates to PathData.
+     *
+     * @return true if successful, false if glyph not found
+     */
+    private fun updatePath(): Boolean {
+        // Get raw data from native code
+        val rawData = if (axes.isEmpty()) {
+            extractor.nativeExtractGlyphPathInternal(codepoint)
+        } else {
+            val tags = axes.keys.toTypedArray()
+            val values = axes.values.toFloatArray()
+            extractor.nativeExtractGlyphPathWithVariationsInternal(codepoint, tags, values)
+        } ?: return false
+
+        // Delegate to PathData to update the path
+        return pathData.update(rawData)
+    }
+
+    /**
+     * Initial update with optional axis values.
+     * Called during initialization.
+     */
+    internal fun initialize(initialAxes: Map<String, Float> = emptyMap()): Boolean {
+        axes.clear()
+        axes.putAll(initialAxes)
+        return updatePath()
     }
 }
 
@@ -189,7 +327,7 @@ fun rememberGlyph(
 
     LaunchedEffect(extractor, codepoint, axes) {
         val glyph = glyphState ?: GlyphState(extractor, codepoint).also { glyphState = it }
-        glyph.updateAxes(axes)
+        glyph.initialize(axes)
     }
 
     return glyphState
