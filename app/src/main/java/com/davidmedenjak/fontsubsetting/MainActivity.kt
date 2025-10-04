@@ -328,7 +328,6 @@ fun GlyphIconCard(
     // Use LaunchedEffect to update axes when fill or grade change
     androidx.compose.runtime.LaunchedEffect(fill, grade, glyph) {
         glyph?.updateAxes {
-            clear()
             put("FILL", fill)
             put("wght", 400f)
             put("GRAD", grade)

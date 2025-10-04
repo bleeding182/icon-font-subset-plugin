@@ -30,9 +30,11 @@ static jfloatArray packGlyphPathToArray(JNIEnv *env, const fontsubsetting::Glyph
         return nullptr;
     }
 
-    // Allocate temporary buffer for packing
-    float *data = static_cast<float *>(malloc(totalSize * sizeof(float)));
+    // Use GetPrimitiveArrayCritical for zero-copy direct memory access
+    // This is faster than malloc + SetFloatArrayRegion
+    float *data = static_cast<float *>(env->GetPrimitiveArrayCritical(result, nullptr));
     if (!data) {
+        env->DeleteLocalRef(result);
         return nullptr;
     }
 
@@ -58,8 +60,8 @@ static jfloatArray packGlyphPathToArray(JNIEnv *env, const fontsubsetting::Glyph
         data[offset++] = cmd.y3;
     }
 
-    env->SetFloatArrayRegion(result, 0, static_cast<jsize>(totalSize), data);
-    free(data);
+    // Release the critical section (mode 0 = copy back and free)
+    env->ReleasePrimitiveArrayCritical(result, data, 0);
 
     return result;
 }

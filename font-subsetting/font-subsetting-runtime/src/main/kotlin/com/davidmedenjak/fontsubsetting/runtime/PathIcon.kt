@@ -291,6 +291,10 @@ class GlyphState internal constructor(
      * @return true if successful, false if glyph not found
      */
     fun setAxis(axis: String, value: Float): Boolean {
+        // Early exit if value hasn't changed (reduces redundant updates)
+        if (axes[axis] == value) {
+            return true
+        }
         axes[axis] = value
         return updatePath()
     }
@@ -370,18 +374,29 @@ class GlyphState internal constructor(
             return false
         }
 
-        // Get raw data from native code using the cached glyph handle
-        val rawData = if (axes.isEmpty()) {
-            extractor.extractGlyphPathFromHandle(
-                nativeGlyphHandle,
-                emptyArray(),
-                floatArrayOf()
-            )
+        // Calculate hash of current axes to detect changes
+        val currentAxesHash = axes.hashCode()
+
+        // Only fetch new raw data if axes have changed
+        val rawData = if (cachedRawData == null || cachedAxesHash != currentAxesHash) {
+            val newRawData = if (axes.isEmpty()) {
+                extractor.extractGlyphPathFromHandle(
+                    nativeGlyphHandle,
+                    emptyArray(),
+                    floatArrayOf()
+                )
+            } else {
+                val tags = axes.keys.toTypedArray()
+                val values = axes.values.toFloatArray()
+                extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
+            } ?: return false
+
+            cachedRawData = newRawData
+            cachedAxesHash = currentAxesHash
+            newRawData
         } else {
-            val tags = axes.keys.toTypedArray()
-            val values = axes.values.toFloatArray()
-            extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
-        } ?: return false
+            cachedRawData!!
+        }
 
         // Validate minimum size for header
         if (rawData.size < 7) return false
@@ -392,28 +407,45 @@ class GlyphState internal constructor(
         val glyphMaxX = rawData[5]
         val glyphMaxY = rawData[6]
 
-        // Calculate transformation for the target size
-        val glyphCenterX = (glyphMinX + glyphMaxX) / 2f
-        val glyphCenterY = (glyphMinY + glyphMaxY) / 2f
-        val glyphWidth = glyphMaxX - glyphMinX
-        val glyphHeight = glyphMaxY - glyphMinY
-        val maxGlyphDimension = maxOf(glyphWidth, glyphHeight)
-        val scaleValue = if (maxGlyphDimension > 0f && targetSizePx > 0f) {
-            targetSizePx / maxGlyphDimension
-        } else {
-            1f
-        }
+        // Calculate hash of transform parameters to detect changes
+        val transformHash = (glyphMinX.toBits() * 31 + glyphMinY.toBits()) * 31 +
+                (glyphMaxX.toBits() * 31 + glyphMaxY.toBits()) * 31 +
+                targetSizePx.toBits()
 
-        // Calculate translation to center the glyph
-        val translateX = if (targetSizePx > 0f) {
-            targetSizePx / 2f - glyphCenterX * scaleValue
+        // Skip transformation calculation if nothing changed
+        val (scaleValue, translateX, translateY) = if (cachedTransformHash != transformHash) {
+            // Calculate transformation for the target size
+            val glyphCenterX = (glyphMinX + glyphMaxX) / 2f
+            val glyphCenterY = (glyphMinY + glyphMaxY) / 2f
+            val glyphWidth = glyphMaxX - glyphMinX
+            val glyphHeight = glyphMaxY - glyphMinY
+            val maxGlyphDimension = maxOf(glyphWidth, glyphHeight)
+            val scale = if (maxGlyphDimension > 0f && targetSizePx > 0f) {
+                targetSizePx / maxGlyphDimension
+            } else {
+                1f
+            }
+
+            // Calculate translation to center the glyph
+            val transX = if (targetSizePx > 0f) {
+                targetSizePx / 2f - glyphCenterX * scale
+            } else {
+                -glyphCenterX
+            }
+            val transY = if (targetSizePx > 0f) {
+                targetSizePx / 2f + glyphCenterY * scale  // Add because Y will be flipped
+            } else {
+                glyphCenterY
+            }
+
+            cachedTransformHash = transformHash
+            cachedScale = scale
+            cachedTranslateX = transX
+            cachedTranslateY = transY
+            Triple(scale, transX, transY)
         } else {
-            -glyphCenterX
-        }
-        val translateY = if (targetSizePx > 0f) {
-            targetSizePx / 2f + glyphCenterY * scaleValue  // Add because Y will be flipped
-        } else {
-            glyphCenterY
+            // Reuse cached transformation
+            Triple(cachedScale, cachedTranslateX, cachedTranslateY)
         }
 
         // Delegate to PathData to update the path with transformation
@@ -463,6 +495,14 @@ class GlyphState internal constructor(
             nativeGlyphHandle = 0
         }
     }
+
+    // Cache to avoid redundant JNI calls and path rebuilds
+    private var cachedRawData: FloatArray? = null
+    private var cachedAxesHash: Int = 0
+    private var cachedTransformHash: Int = 0
+    private var cachedScale: Float = 1f
+    private var cachedTranslateX: Float = 0f
+    private var cachedTranslateY: Float = 0f
 }
 
 /**
