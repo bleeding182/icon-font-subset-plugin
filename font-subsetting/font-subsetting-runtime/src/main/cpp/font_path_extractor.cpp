@@ -41,21 +41,36 @@ namespace fontsubsetting {
         capacity = 0;
     }
 
-    void PathCommandArray::reserve(size_t new_capacity) {
+    void PathCommandArray::reserve(unsigned long new_capacity) {
         if (new_capacity <= capacity) return;
 
-        PathCommand *new_data = (PathCommand *) realloc(data, new_capacity * sizeof(PathCommand));
+        PathCommand *new_data = (PathCommand *) malloc(new_capacity * sizeof(PathCommand));
         if (!new_data) {
             return;
         }
+
+        // Copy existing data
+        if (size > 0) {
+            memcpy(new_data, data, size * sizeof(PathCommand));
+        }
+
+        // Free old data if it was heap-allocated
+        if (data != inline_storage) {
+            free(data);
+        }
+
         data = new_data;
         capacity = new_capacity;
     }
 
+    void PathCommandArray::grow() {
+        unsigned long new_capacity = capacity * 2;
+        reserve(new_capacity);
+    }
+
     void PathCommandArray::push_back(const PathCommand &cmd) {
         if (size >= capacity) {
-            size_t new_capacity = capacity == 0 ? 8 : capacity * 2;
-            reserve(new_capacity);
+            grow();
         }
         if (size < capacity) {
             data[size++] = cmd;
@@ -74,6 +89,7 @@ namespace fontsubsetting {
     GlyphPath::~GlyphPath() {}
 
     // HarfBuzz draw callbacks - store coordinates in font units
+    __attribute__((always_inline))
     static void move_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                              hb_draw_state_t * /*st*/,
                              float to_x, float to_y,
@@ -81,11 +97,12 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::MOVE_TO;
-        cmd.x1 = to_x;
-        cmd.y1 = to_y;
+        cmd.point.x = to_x;
+        cmd.point.y = to_y;
         ctx->commands->push_back(cmd);
     }
 
+    __attribute__((always_inline))
     static void line_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                              hb_draw_state_t * /*st*/,
                              float to_x, float to_y,
@@ -93,11 +110,12 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::LINE_TO;
-        cmd.x1 = to_x;
-        cmd.y1 = to_y;
+        cmd.point.x = to_x;
+        cmd.point.y = to_y;
         ctx->commands->push_back(cmd);
     }
 
+    __attribute__((always_inline))
     static void quadratic_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                                   hb_draw_state_t * /*st*/,
                                   float control_x, float control_y,
@@ -106,13 +124,14 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::QUADRATIC_TO;
-        cmd.x1 = control_x;
-        cmd.y1 = control_y;
-        cmd.x2 = to_x;
-        cmd.y2 = to_y;
+        cmd.quadratic.cx = control_x;
+        cmd.quadratic.cy = control_y;
+        cmd.quadratic.x = to_x;
+        cmd.quadratic.y = to_y;
         ctx->commands->push_back(cmd);
     }
 
+    __attribute__((always_inline))
     static void cubic_to_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                               hb_draw_state_t * /*st*/,
                               float control1_x, float control1_y,
@@ -122,15 +141,16 @@ namespace fontsubsetting {
         auto *ctx = static_cast<PathDrawContext *>(draw_data);
         PathCommand cmd;
         cmd.type = PathCommand::CUBIC_TO;
-        cmd.x1 = control1_x;
-        cmd.y1 = control1_y;
-        cmd.x2 = control2_x;
-        cmd.y2 = control2_y;
-        cmd.x3 = to_x;
-        cmd.y3 = to_y;
+        cmd.cubic.cx1 = control1_x;
+        cmd.cubic.cy1 = control1_y;
+        cmd.cubic.cx2 = control2_x;
+        cmd.cubic.cy2 = control2_y;
+        cmd.cubic.x = to_x;
+        cmd.cubic.y = to_y;
         ctx->commands->push_back(cmd);
     }
 
+    __attribute__((always_inline))
     static void close_path_func(hb_draw_funcs_t * /*dfuncs*/, void *draw_data,
                                 hb_draw_state_t * /*st*/,
                                 void * /*user_data*/) {
@@ -139,9 +159,6 @@ namespace fontsubsetting {
         cmd.type = PathCommand::CLOSE;
         ctx->commands->push_back(cmd);
     }
-
-    // Cached default language (avoids string parsing on every call)
-    static hb_language_t default_language = hb_language_from_string("en", -1);
 
     // SharedFontData implementation
     SharedFontData::SharedFontData()
@@ -176,7 +193,7 @@ namespace fontsubsetting {
         }
     }
 
-    bool SharedFontData::initialize(const void *fontData, size_t fontDataSize) {
+    bool SharedFontData::initialize(const void *fontData, unsigned long fontDataSize) {
         if (!fontData || fontDataSize == 0) {
             return false;
         }
@@ -235,10 +252,11 @@ namespace fontsubsetting {
         return true;
     }
 
+    __attribute__((hot))
     GlyphPath SharedFontData::extractPathDirect(
             unsigned int codepoint,
             const Variation *variations,
-            size_t variationCount) {
+            unsigned long variationCount) {
 
         GlyphPath result;
 
@@ -248,12 +266,12 @@ namespace fontsubsetting {
 
         result.unitsPerEm = upem;
 
-        // Apply variable font variations if provided
+        // Apply variable font variations if provided (max 4 axes for Material Symbols)
         if (variationCount > 0 && variations) {
-            hb_variation_t hb_variations[16];
-            size_t actual_count = variationCount > 16 ? 16 : variationCount;
+            hb_variation_t hb_variations[4];
+            unsigned long actual_count = variationCount > 4 ? 4 : variationCount;
 
-            for (size_t i = 0; i < actual_count; i++) {
+            for (unsigned long i = 0; i < actual_count; i++) {
                 const char *tag_str = variations[i].tag;
                 hb_variations[i].tag = HB_TAG(
                         tag_str[0] ? tag_str[0] : ' ',
@@ -276,7 +294,7 @@ namespace fontsubsetting {
         hb_buffer_add(reusable_buffer, codepoint, 0);
         hb_buffer_set_direction(reusable_buffer, HB_DIRECTION_LTR);
         hb_buffer_set_script(reusable_buffer, HB_SCRIPT_COMMON);
-        hb_buffer_set_language(reusable_buffer, default_language);
+        hb_buffer_set_language(reusable_buffer, HB_LANGUAGE_INVALID);
 
         hb_shape(prototypeFont, reusable_buffer, nullptr, 0);
 
@@ -302,76 +320,45 @@ namespace fontsubsetting {
         // Extract glyph outline using reusable draw_funcs
         hb_font_draw_glyph(prototypeFont, glyph_id, draw_funcs, &ctx);
 
-        // Scale all path coordinates to normalized space
-        for (size_t i = 0; i < result.commands.size; i++) {
-            PathCommand &cmd = result.commands.data[i];
-
-            switch (cmd.type) {
-                case PathCommand::MOVE_TO:
-                case PathCommand::LINE_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    break;
-
-                case PathCommand::QUADRATIC_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    cmd.x2 *= scale;
-                    cmd.y2 *= scale;
-                    break;
-
-                case PathCommand::CUBIC_TO:
-                    cmd.x1 *= scale;
-                    cmd.y1 *= scale;
-                    cmd.x2 *= scale;
-                    cmd.y2 *= scale;
-                    cmd.x3 *= scale;
-                    cmd.y3 *= scale;
-                    break;
-
-                case PathCommand::CLOSE:
-                    break;
-            }
-        }
-
-        // Calculate bounding box
+        // Scale path coordinates and calculate bounding box in single pass
         float pathMinX = FLT_MAX, pathMinY = FLT_MAX, pathMaxX = -FLT_MAX, pathMaxY = -FLT_MAX;
-        for (size_t i = 0; i < result.commands.size; i++) {
+
+        for (unsigned long i = 0; i < result.commands.size; i++) {
             PathCommand &cmd = result.commands.data[i];
 
             switch (cmd.type) {
                 case PathCommand::MOVE_TO:
                 case PathCommand::LINE_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
+                    cmd.point.x *= scale;
+                    cmd.point.y *= scale;
+                    pathMinX = min(pathMinX, cmd.point.x);
+                    pathMinY = min(pathMinY, cmd.point.y);
+                    pathMaxX = max(pathMaxX, cmd.point.x);
+                    pathMaxY = max(pathMaxY, cmd.point.y);
                     break;
 
                 case PathCommand::QUADRATIC_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
-                    pathMinX = min(pathMinX, cmd.x2);
-                    pathMinY = min(pathMinY, cmd.y2);
-                    pathMaxX = max(pathMaxX, cmd.x2);
-                    pathMaxY = max(pathMaxY, cmd.y2);
+                    cmd.quadratic.cx *= scale;
+                    cmd.quadratic.cy *= scale;
+                    cmd.quadratic.x *= scale;
+                    cmd.quadratic.y *= scale;
+                    pathMinX = min(pathMinX, min(cmd.quadratic.cx, cmd.quadratic.x));
+                    pathMinY = min(pathMinY, min(cmd.quadratic.cy, cmd.quadratic.y));
+                    pathMaxX = max(pathMaxX, max(cmd.quadratic.cx, cmd.quadratic.x));
+                    pathMaxY = max(pathMaxY, max(cmd.quadratic.cy, cmd.quadratic.y));
                     break;
 
                 case PathCommand::CUBIC_TO:
-                    pathMinX = min(pathMinX, cmd.x1);
-                    pathMinY = min(pathMinY, cmd.y1);
-                    pathMaxX = max(pathMaxX, cmd.x1);
-                    pathMaxY = max(pathMaxY, cmd.y1);
-                    pathMinX = min(pathMinX, cmd.x2);
-                    pathMinY = min(pathMinY, cmd.y2);
-                    pathMaxX = max(pathMaxX, cmd.x2);
-                    pathMaxY = max(pathMaxY, cmd.y2);
-                    pathMinX = min(pathMinX, cmd.x3);
-                    pathMinY = min(pathMinY, cmd.y3);
-                    pathMaxX = max(pathMaxX, cmd.x3);
-                    pathMaxY = max(pathMaxY, cmd.y3);
+                    cmd.cubic.cx1 *= scale;
+                    cmd.cubic.cy1 *= scale;
+                    cmd.cubic.cx2 *= scale;
+                    cmd.cubic.cy2 *= scale;
+                    cmd.cubic.x *= scale;
+                    cmd.cubic.y *= scale;
+                    pathMinX = min(pathMinX, min(min(cmd.cubic.cx1, cmd.cubic.cx2), cmd.cubic.x));
+                    pathMinY = min(pathMinY, min(min(cmd.cubic.cy1, cmd.cubic.cy2), cmd.cubic.y));
+                    pathMaxX = max(pathMaxX, max(max(cmd.cubic.cx1, cmd.cubic.cx2), cmd.cubic.x));
+                    pathMaxY = max(pathMaxY, max(max(cmd.cubic.cy1, cmd.cubic.cy2), cmd.cubic.y));
                     break;
 
                 case PathCommand::CLOSE:

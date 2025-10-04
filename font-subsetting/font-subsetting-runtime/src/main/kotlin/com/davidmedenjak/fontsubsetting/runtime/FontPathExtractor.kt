@@ -164,12 +164,6 @@ class FontPathExtractor : AutoCloseable {
         }
     }
 
-    @Throws(Throwable::class)
-    protected fun finalize() {
-        // Fallback cleanup in case close() wasn't called
-        close()
-    }
-
     /**
      * Creates a native font handle from font data.
      * Returns native pointer (as long) or 0 on failure.
@@ -180,24 +174,6 @@ class FontPathExtractor : AutoCloseable {
      * Destroys a native font handle and frees associated memory.
      */
     private external fun nativeDestroyFontHandle(fontPtr: Long)
-
-    /**
-     * Extracts glyph path using native font pointer.
-     */
-    private external fun nativeExtractGlyphPath(fontPtr: Long, codepoint: Int): FloatArray?
-
-    /**
-     * Extracts glyph path with variations using native font pointer.
-     */
-    private external fun nativeExtractGlyphPathWithVariations(
-        fontPtr: Long,
-        codepoint: Int,
-        variationTags: IntArray,
-        variationValues: FloatArray
-    ): FloatArray?
-
-    // New direct extraction methods using SharedFontData (no per-glyph handles)
-    // These are more efficient as they skip the per-glyph handle management
 
     /**
      * Extracts glyph path directly from SharedFontData without axis variations.

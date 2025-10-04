@@ -93,53 +93,65 @@ internal class PathData {
         composePath.fillType = PathFillType.NonZero
 
         // Fill path directly from raw command data with transformations applied
-        // Each command: [type, x1, y1, x2, y2, x3, y3]
+        // Command format (union-based, 10 floats per command):
+        // [type, _padding(3), cx1/x/cx, cy1/y/cy, cx2/x, cy2/y, x, y]
+        // The union is always 6 floats, we read based on command type:
+        // - MOVE_TO/LINE_TO: use first 2 floats (x, y)
+        // - QUADRATIC_TO: use first 4 floats (cx, cy, x, y)
+        // - CUBIC_TO: use all 6 floats (cx1, cy1, cx2, cy2, x, y)
         var offset = 7
         for (i in 0 until numCommands) {
-            if (offset + 7 > rawData.size) break
+            if (offset + 10 > rawData.size) break
 
             val type = rawData[offset].toInt()
-            val x1 = rawData[offset + 1]
-            val y1 = rawData[offset + 2]
-            val x2 = rawData[offset + 3]
-            val y2 = rawData[offset + 4]
-            val x3 = rawData[offset + 5]
-            val y3 = rawData[offset + 6]
+            // Skip padding (offset+1, offset+2, offset+3)
+            // Union data starts at offset+4 (6 floats total)
 
             when (type) {
-                PATH_COMMAND_MOVE_TO -> {
-                    val tx = x1 * scaleX + translateX
-                    val ty = y1 * scaleY + translateY
-                    composePath.moveTo(tx, ty)
-                }
-
-                PATH_COMMAND_LINE_TO -> {
-                    val tx = x1 * scaleX + translateX
-                    val ty = y1 * scaleY + translateY
-                    composePath.lineTo(tx, ty)
+                PATH_COMMAND_MOVE_TO, PATH_COMMAND_LINE_TO -> {
+                    val x = rawData[offset + 4]
+                    val y = rawData[offset + 5]
+                    val tx = x * scaleX + translateX
+                    val ty = y * scaleY + translateY
+                    if (type == PATH_COMMAND_MOVE_TO) {
+                        composePath.moveTo(tx, ty)
+                    } else {
+                        composePath.lineTo(tx, ty)
+                    }
                 }
 
                 PATH_COMMAND_QUADRATIC_TO -> {
-                    val tx1 = x1 * scaleX + translateX
-                    val ty1 = y1 * scaleY + translateY
-                    val tx2 = x2 * scaleX + translateX
-                    val ty2 = y2 * scaleY + translateY
+                    val cx = rawData[offset + 4]
+                    val cy = rawData[offset + 5]
+                    val x = rawData[offset + 6]
+                    val y = rawData[offset + 7]
+                    val tx1 = cx * scaleX + translateX
+                    val ty1 = cy * scaleY + translateY
+                    val tx2 = x * scaleX + translateX
+                    val ty2 = y * scaleY + translateY
                     composePath.quadraticTo(tx1, ty1, tx2, ty2)
                 }
 
                 PATH_COMMAND_CUBIC_TO -> {
-                    val tx1 = x1 * scaleX + translateX
-                    val ty1 = y1 * scaleY + translateY
-                    val tx2 = x2 * scaleX + translateX
-                    val ty2 = y2 * scaleY + translateY
-                    val tx3 = x3 * scaleX + translateX
-                    val ty3 = y3 * scaleY + translateY
+                    val cx1 = rawData[offset + 4]
+                    val cy1 = rawData[offset + 5]
+                    val cx2 = rawData[offset + 6]
+                    val cy2 = rawData[offset + 7]
+                    val x = rawData[offset + 8]
+                    val y = rawData[offset + 9]
+                    val tx1 = cx1 * scaleX + translateX
+                    val ty1 = cy1 * scaleY + translateY
+                    val tx2 = cx2 * scaleX + translateX
+                    val ty2 = cy2 * scaleY + translateY
+                    val tx3 = x * scaleX + translateX
+                    val ty3 = y * scaleY + translateY
                     composePath.cubicTo(tx1, ty1, tx2, ty2, tx3, ty3)
                 }
+
                 PATH_COMMAND_CLOSE -> composePath.close()
             }
 
-            offset += 7
+            offset += 10
         }
 
         return true

@@ -2,32 +2,43 @@
 #define FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 
 // Direct typedef to avoid including <stddef.h>
-typedef __SIZE_TYPE__ size_t;
+//typedef __SIZE_TYPE__ size_t;
 
 #include <hb.h>
 
 namespace fontsubsetting {
 
     struct PathCommand {
-        enum Type {
-            MOVE_TO,
-            LINE_TO,
-            QUADRATIC_TO,
-            CUBIC_TO,
-            CLOSE
+        enum Type : uint8_t {
+            MOVE_TO = 0,
+            LINE_TO = 1,
+            QUADRATIC_TO = 2,
+            CUBIC_TO = 3,
+            CLOSE = 4
         };
 
         Type type;
-        float x1, y1;    // First point (or only point for MOVE_TO, LINE_TO)
-        float x2, y2;    // Second point (for QUADRATIC_TO, CUBIC_TO)
-        float x3, y3;    // Third point (for CUBIC_TO)
+        uint8_t _padding[3];  // Maintain 4-byte alignment for better memory access
+        union {
+            struct {
+                float x, y;
+            } point;                          // MOVE_TO, LINE_TO
+            struct {
+                float cx, cy, x, y;
+            } quadratic;              // QUADRATIC_TO
+            struct {
+                float cx1, cy1, cx2, cy2, x, y;
+            } cubic;      // CUBIC_TO
+        };
     };
 
-    // Simple dynamic array for path commands (replaces std::vector)
+    // Simple dynamic array for path commands with Small Buffer Optimization
     struct PathCommandArray {
+        static const unsigned long INLINE_CAPACITY = 16;  // Material icons average ~12-20 commands
+        PathCommand inline_storage[INLINE_CAPACITY];
         PathCommand *data;
-        size_t size;
-        size_t capacity;
+        unsigned long size;
+        unsigned long capacity;
 
         PathCommandArray();
 
@@ -37,9 +48,12 @@ namespace fontsubsetting {
 
         void clear();
 
-        void reserve(size_t new_capacity);
+        void reserve(unsigned long new_capacity);
 
         bool empty() const { return size == 0; }
+
+    private:
+        void grow();
     };
 
     // Simple key-value pair for variations (replaces std::map)
@@ -85,14 +99,14 @@ namespace fontsubsetting {
         ~SharedFontData();
 
         // Initialize from font data
-        bool initialize(const void *fontData, size_t fontDataSize);
+        bool initialize(const void *fontData, unsigned long fontDataSize);
 
         // Extract path directly without creating intermediate objects
         // This is the main optimized path extraction method
         GlyphPath extractPathDirect(
                 unsigned int codepoint,
                 const Variation *variations,
-                size_t variationCount
+                unsigned long variationCount
         );
 
         // Clean up all HarfBuzz resources

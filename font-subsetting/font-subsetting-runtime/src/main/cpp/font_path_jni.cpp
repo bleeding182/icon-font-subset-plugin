@@ -2,10 +2,10 @@
 
 // Direct declarations to avoid including <cstdlib> and <cstring>
 extern "C" {
-void *malloc(size_t);
+void *malloc(unsigned long);
 void free(void *);
-void *memcpy(void *, const void *, size_t);
-void *realloc(void *, size_t);
+void *memcpy(void *, const void *, unsigned long);
+void *realloc(void *, unsigned long);
 }
 
 #include "font_path_extractor.h"
@@ -14,7 +14,7 @@ void *realloc(void *, size_t);
 // and a shared HarfBuzz font object that is reused by all glyphs
 struct NativeFontHandle {
     void *fontData;                                // Raw font file data
-    size_t fontDataSize;                           // Size of font data
+    unsigned long fontDataSize;                    // Size of font data
     fontsubsetting::SharedFontData *sharedFont;    // Shared HarfBuzz objects (blob, face, font, buffer, draw_funcs)
 };
 
@@ -32,47 +32,93 @@ static inline void intToTag(jint tag, char *dest) {
 static jfloatArray packGlyphPathToArray(JNIEnv *env, const fontsubsetting::GlyphPath &glyphPath) {
     // Calculate result array size
     // Format: [numCommands, advanceWidth, unitsPerEm, minX, minY, maxX, maxY, commands...]
-    // Each command: [type, x1, y1, x2, y2, x3, y3] (some values unused based on type)
-    size_t commandFloats = glyphPath.commands.size * 7; // type + 6 floats per command
-    size_t totalSize = 7 + commandFloats; // header (7 values) + commands
+    // Each command: [type, padding(3 floats), union_data(6 floats)] = 10 floats total
+    unsigned long commandFloats = glyphPath.commands.size * 10;
+    unsigned long totalSize = 7 + commandFloats; // header (7 values) + commands
 
     jfloatArray result = env->NewFloatArray(static_cast<jsize>(totalSize));
     if (!result) {
         return nullptr;
     }
 
-    // Use GetPrimitiveArrayCritical for zero-copy direct memory access
-    // This is faster than malloc + SetFloatArrayRegion
-    float *data = static_cast<float *>(env->GetPrimitiveArrayCritical(result, nullptr));
-    if (!data) {
-        env->DeleteLocalRef(result);
-        return nullptr;
+    unsigned long offset = 0;
+
+    // For small paths (< 256 floats), use critical section for speed
+    // For large paths, use regular path to avoid blocking GC too long
+    if (totalSize < 256) {
+        // Fast path: Use GetPrimitiveArrayCritical for zero-copy direct memory access
+        float *data = static_cast<float *>(env->GetPrimitiveArrayCritical(result, nullptr));
+        if (!data) {
+            env->DeleteLocalRef(result);
+            return nullptr;
+        }
+
+        // Header: [numCommands, advanceWidth, unitsPerEm, minX, minY, maxX, maxY]
+        data[offset++] = static_cast<float>(glyphPath.commands.size);
+        data[offset++] = glyphPath.advanceWidth;
+        data[offset++] = static_cast<float>(glyphPath.unitsPerEm);
+        data[offset++] = glyphPath.minX;
+        data[offset++] = glyphPath.minY;
+        data[offset++] = glyphPath.maxX;
+        data[offset++] = glyphPath.maxY;
+
+        // Commands: [type, padding(3 floats), union data(6 floats)]
+        // We simply copy all 6 floats from the union regardless of type
+        for (unsigned long i = 0; i < glyphPath.commands.size; i++) {
+            const auto &cmd = glyphPath.commands.data[i];
+            data[offset++] = static_cast<float>(cmd.type);
+            data[offset++] = 0.0f;  // padding
+            data[offset++] = 0.0f;  // padding
+            data[offset++] = 0.0f;  // padding
+
+            // Copy all 6 floats from union (simpler than type switching)
+            // The union is always 24 bytes = 6 floats, so we can safely access cubic
+            data[offset++] = cmd.cubic.cx1;  // Also covers: point.x, quadratic.cx
+            data[offset++] = cmd.cubic.cy1;  // Also covers: point.y, quadratic.cy
+            data[offset++] = cmd.cubic.cx2;  // Also covers: quadratic.x
+            data[offset++] = cmd.cubic.cy2;  // Also covers: quadratic.y
+            data[offset++] = cmd.cubic.x;
+            data[offset++] = cmd.cubic.y;
+        }
+
+        // Release the critical section (mode 0 = copy back and free)
+        env->ReleasePrimitiveArrayCritical(result, data, 0);
+    } else {
+        // Slow path: Use temporary buffer for large paths to avoid blocking GC
+        float *data = (float *) malloc(totalSize * sizeof(float));
+        if (!data) {
+            env->DeleteLocalRef(result);
+            return nullptr;
+        }
+
+        // Header
+        data[offset++] = static_cast<float>(glyphPath.commands.size);
+        data[offset++] = glyphPath.advanceWidth;
+        data[offset++] = static_cast<float>(glyphPath.unitsPerEm);
+        data[offset++] = glyphPath.minX;
+        data[offset++] = glyphPath.minY;
+        data[offset++] = glyphPath.maxX;
+        data[offset++] = glyphPath.maxY;
+
+        // Commands - same as fast path
+        for (unsigned long i = 0; i < glyphPath.commands.size; i++) {
+            const auto &cmd = glyphPath.commands.data[i];
+            data[offset++] = static_cast<float>(cmd.type);
+            data[offset++] = 0.0f;
+            data[offset++] = 0.0f;
+            data[offset++] = 0.0f;
+
+            data[offset++] = cmd.cubic.cx1;
+            data[offset++] = cmd.cubic.cy1;
+            data[offset++] = cmd.cubic.cx2;
+            data[offset++] = cmd.cubic.cy2;
+            data[offset++] = cmd.cubic.x;
+            data[offset++] = cmd.cubic.y;
+        }
+
+        env->SetFloatArrayRegion(result, 0, static_cast<jsize>(totalSize), data);
+        free(data);
     }
-
-    size_t offset = 0;
-    // Header: [numCommands, advanceWidth, unitsPerEm, minX, minY, maxX, maxY]
-    data[offset++] = static_cast<float>(glyphPath.commands.size);
-    data[offset++] = glyphPath.advanceWidth;
-    data[offset++] = static_cast<float>(glyphPath.unitsPerEm);
-    data[offset++] = glyphPath.minX;
-    data[offset++] = glyphPath.minY;
-    data[offset++] = glyphPath.maxX;
-    data[offset++] = glyphPath.maxY;
-
-    // Commands: [type, x1, y1, x2, y2, x3, y3]
-    for (size_t i = 0; i < glyphPath.commands.size; i++) {
-        const auto &cmd = glyphPath.commands.data[i];
-        data[offset++] = static_cast<float>(cmd.type);
-        data[offset++] = cmd.x1;
-        data[offset++] = cmd.y1;
-        data[offset++] = cmd.x2;
-        data[offset++] = cmd.y2;
-        data[offset++] = cmd.x3;
-        data[offset++] = cmd.y3;
-    }
-
-    // Release the critical section (mode 0 = copy back and free)
-    env->ReleasePrimitiveArrayCritical(result, data, 0);
 
     return result;
 }
@@ -113,7 +159,7 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeCreateFont
     // Create font handle
     NativeFontHandle* handle = new NativeFontHandle();
     handle->fontData = nativeFontData;
-    handle->fontDataSize = static_cast<size_t>(fontDataSize);
+    handle->fontDataSize = static_cast<unsigned long>(fontDataSize);
     handle->sharedFont = new fontsubsetting::SharedFontData();
     handle->sharedFont->initialize(handle->fontData, handle->fontDataSize);
 
@@ -298,9 +344,9 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
 
     NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
 
-    // Parse variations - stack allocate, max 16 variations
-    fontsubsetting::Variation variations[16];
-    size_t variationCount = 0;
+    // Parse variations - stack allocate, max 4 variations (sufficient for Material Symbols)
+    fontsubsetting::Variation variations[4];
+    unsigned long variationCount = 0;
 
     if (variationTags && variationValues) {
         jsize tagCount = env->GetArrayLength(variationTags);
@@ -309,9 +355,9 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractPat
         if (tagCount == valueCount && tagCount > 0) {
             jint *tags = env->GetIntArrayElements(variationTags, nullptr);
             jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
-            variationCount = tagCount > 16 ? 16 : tagCount;
+            variationCount = tagCount > 4 ? 4 : tagCount;
 
-            for (size_t i = 0; i < variationCount; i++) {
+            for (unsigned long i = 0; i < variationCount; i++) {
                 intToTag(tags[i], variations[i].tag);
                 variations[i].value = values[i];
             }
