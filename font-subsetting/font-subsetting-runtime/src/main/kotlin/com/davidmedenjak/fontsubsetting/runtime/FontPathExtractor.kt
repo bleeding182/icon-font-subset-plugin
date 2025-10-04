@@ -55,7 +55,7 @@ class FontPathExtractor : AutoCloseable {
     }
 
     // Native pointer to font data stored in native memory
-    private var nativeFontPtr: Long = 0
+    internal var nativeFontPtr: Long = 0
 
     private constructor(fontData: ByteArray) {
         if (!nativeLibraryLoaded) {
@@ -159,4 +159,45 @@ class FontPathExtractor : AutoCloseable {
         variationTags: Array<String>,
         variationValues: FloatArray
     ): FloatArray?
+
+    /**
+     * Creates a native glyph handle that caches HarfBuzz objects for efficient updates.
+     * Returns native pointer (as long) or 0 on failure.
+     */
+    private external fun nativeCreateGlyphHandle(fontPtr: Long, codepoint: Int): Long
+
+    /**
+     * Destroys a native glyph handle and frees associated HarfBuzz objects.
+     */
+    private external fun nativeDestroyGlyphHandle(glyphHandlePtr: Long)
+
+    /**
+     * Extracts glyph path from a glyph handle with variations.
+     * This reuses cached HarfBuzz objects for better performance.
+     */
+    private external fun nativeExtractGlyphPathFromHandle(
+        glyphHandlePtr: Long,
+        variationTags: Array<String>,
+        variationValues: FloatArray
+    ): FloatArray?
+
+    // Internal wrappers for GlyphState to access without name mangling
+    internal fun createGlyphHandle(codepoint: Int): Long {
+        checkNotClosed()
+        return nativeCreateGlyphHandle(nativeFontPtr, codepoint)
+    }
+
+    internal fun destroyGlyphHandle(glyphHandlePtr: Long) {
+        checkNotClosed()
+        nativeDestroyGlyphHandle(glyphHandlePtr)
+    }
+
+    internal fun extractGlyphPathFromHandle(
+        glyphHandlePtr: Long,
+        variationTags: Array<String>,
+        variationValues: FloatArray
+    ): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathFromHandle(glyphHandlePtr, variationTags, variationValues)
+    }
 }

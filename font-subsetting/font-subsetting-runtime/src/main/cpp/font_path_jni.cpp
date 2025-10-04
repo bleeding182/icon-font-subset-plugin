@@ -207,4 +207,95 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     return packGlyphPathToArray(env, glyphPath);
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeCreateGlyphHandle(
+        JNIEnv* /* env */,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint) {
+
+    if (fontPtr == 0) {
+        return 0;
+    }
+
+    NativeFontHandle* handle = reinterpret_cast<NativeFontHandle*>(fontPtr);
+
+    auto* glyphHandle = new fontsubsetting::GlyphHandle();
+    if (!glyphHandle->initialize(handle->fontData, handle->fontDataSize, 
+                                   static_cast<unsigned int>(codepoint))) {
+        delete glyphHandle;
+        return 0;
+    }
+
+    return reinterpret_cast<jlong>(glyphHandle);
+}
+
+JNIEXPORT void JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeDestroyGlyphHandle(
+        JNIEnv* /* env */,
+        jobject /* this */,
+        jlong glyphHandlePtr) {
+
+    if (glyphHandlePtr == 0) {
+        return;
+    }
+
+    auto* glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle*>(glyphHandlePtr);
+    delete glyphHandle;
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathFromHandle(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong glyphHandlePtr,
+        jobjectArray variationTags,
+        jfloatArray variationValues) {
+
+    if (glyphHandlePtr == 0) {
+        return nullptr;
+    }
+
+    auto* glyphHandle = reinterpret_cast<fontsubsetting::GlyphHandle*>(glyphHandlePtr);
+
+    fontsubsetting::Variation variations[16];
+    size_t variationCount = 0;
+
+    if (variationTags && variationValues) {
+        jsize tagCount = env->GetArrayLength(variationTags);
+        jsize valueCount = env->GetArrayLength(variationValues);
+
+        if (tagCount == valueCount && tagCount > 0) {
+            jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
+            variationCount = tagCount > 16 ? 16 : tagCount;
+
+            for (size_t i = 0; i < variationCount; i++) {
+                auto tagObj = static_cast<jstring>(env->GetObjectArrayElement(variationTags, i));
+                const char *tagChars = env->GetStringUTFChars(tagObj, nullptr);
+
+                size_t len = 0;
+                while (tagChars[len] && len < 4) {
+                    variations[i].tag[len] = tagChars[len];
+                    len++;
+                }
+                variations[i].tag[len] = '\0';
+                variations[i].value = values[i];
+
+                env->ReleaseStringUTFChars(tagObj, tagChars);
+                env->DeleteLocalRef(tagObj);
+            }
+
+            env->ReleaseFloatArrayElements(variationValues, values, JNI_ABORT);
+        }
+    }
+
+    auto glyphPath = glyphHandle->extractPath(variations, variationCount);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
 } // extern "C"

@@ -32,6 +32,7 @@ import java.io.InputStream
  * Example usage:
  * ```kotlin
  * val extractor = rememberFontPathExtractor(R.font.my_font)
+ * // Static glyph - path is pre-scaled to 48dp
  * val glyph = rememberGlyph(extractor, '★', size = 48.dp)
  * ```
  *
@@ -223,6 +224,9 @@ class GlyphState internal constructor(
     private val axes = mutableMapOf<String, Float>()
     private var targetSizePx: Float = 0f
 
+    // Cached native glyph handle for efficient axis updates
+    private var nativeGlyphHandle: Long = 0
+
     // Observable state to trigger recomposition when path changes
     private var pathVersion by mutableStateOf(0)
 
@@ -361,13 +365,22 @@ class GlyphState internal constructor(
      * @return true if successful, false if glyph not found
      */
     private fun updatePath(): Boolean {
-        // Get raw data from native code
+        // Ensure we have a native glyph handle
+        if (nativeGlyphHandle == 0L) {
+            return false
+        }
+
+        // Get raw data from native code using the cached glyph handle
         val rawData = if (axes.isEmpty()) {
-            extractor.nativeExtractGlyphPathInternal(codepoint)
+            extractor.extractGlyphPathFromHandle(
+                nativeGlyphHandle,
+                emptyArray(),
+                floatArrayOf()
+            )
         } else {
             val tags = axes.keys.toTypedArray()
             val values = axes.values.toFloatArray()
-            extractor.nativeExtractGlyphPathWithVariationsInternal(codepoint, tags, values)
+            extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
         } ?: return false
 
         // Validate minimum size for header
@@ -428,10 +441,27 @@ class GlyphState internal constructor(
         initialAxes: Map<String, Float> = emptyMap(),
         sizePx: Float = 0f
     ): Boolean {
+        // Create native glyph handle
+        nativeGlyphHandle = extractor.createGlyphHandle(codepoint)
+        if (nativeGlyphHandle == 0L) {
+            return false
+        }
+
         axes.clear()
         axes.putAll(initialAxes)
         targetSizePx = sizePx
         return updatePath()
+    }
+
+    /**
+     * Clean up native resources.
+     * Called when the GlyphState is no longer needed.
+     */
+    internal fun dispose() {
+        if (nativeGlyphHandle != 0L) {
+            extractor.destroyGlyphHandle(nativeGlyphHandle)
+            nativeGlyphHandle = 0
+        }
     }
 }
 
@@ -494,6 +524,12 @@ fun rememberGlyph(
     LaunchedEffect(extractor, codepoint, sizePx, axes) {
         val glyph = glyphState ?: GlyphState(extractor, codepoint).also { glyphState = it }
         glyph.initialize(axes, sizePx)
+    }
+
+    DisposableEffect(extractor, codepoint) {
+        onDispose {
+            glyphState?.dispose()
+        }
     }
 
     return glyphState

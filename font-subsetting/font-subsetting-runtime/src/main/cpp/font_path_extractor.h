@@ -2,6 +2,7 @@
 #define FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 
 #include <stddef.h>
+#include <hb.h>
 
 namespace fontsubsetting {
 
@@ -58,7 +59,35 @@ namespace fontsubsetting {
         inline bool isEmpty() const { return commands.empty(); }
     };
 
-/**
+    /**
+     * Reusable glyph handle that caches HarfBuzz objects for efficient axis updates.
+     * This avoids recreating HarfBuzz face/font/buffer/draw_funcs on every extraction.
+     */
+    struct GlyphHandle {
+        hb_blob_t *blob;
+        hb_face_t *face;
+        hb_font_t *font;
+        hb_buffer_t *buffer;
+        hb_draw_funcs_t *draw_funcs;
+        hb_codepoint_t glyph_id;
+        unsigned int codepoint;
+        unsigned int upem;
+
+        GlyphHandle();
+
+        ~GlyphHandle();
+
+        // Initialize the handle with font data and codepoint
+        bool initialize(const void *fontData, size_t fontDataSize, unsigned int cp);
+
+        // Extract path with current variations (reuses HarfBuzz objects)
+        GlyphPath extractPath(const Variation *variations, size_t variationCount);
+
+        // Clean up all HarfBuzz resources
+        void destroy();
+    };
+
+    /**
  * Extracts the path data for a specific glyph from a font.
  * 
  * @param fontData The font file data
