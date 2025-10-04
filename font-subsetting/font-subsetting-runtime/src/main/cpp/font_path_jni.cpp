@@ -423,4 +423,205 @@ Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGly
     return packGlyphPathToArray(env, glyphPath);
 }
 
+// New direct extraction methods that use SharedFontData (simpler, no per-glyph handle management)
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect0(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint) {
+
+    if (fontPtr == 0) {
+        return nullptr;
+    }
+
+    NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
+
+    // Create temporary glyph handle using shared font data
+    fontsubsetting::GlyphHandle glyphHandle;
+    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
+        return nullptr;
+    }
+
+    // Extract path with no variations
+    auto glyphPath = glyphHandle.extractPath(nullptr, 0);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect1(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint,
+        jint tag1,
+        jfloat value1) {
+
+    if (fontPtr == 0) {
+        return nullptr;
+    }
+
+    NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
+
+    // Create temporary glyph handle using shared font data
+    fontsubsetting::GlyphHandle glyphHandle;
+    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
+        return nullptr;
+    }
+
+    // Single axis variation
+    fontsubsetting::Variation variations[1];
+    intToTag(tag1, variations[0].tag);
+    variations[0].value = value1;
+
+    auto glyphPath = glyphHandle.extractPath(variations, 1);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect2(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint,
+        jint tag1,
+        jfloat value1,
+        jint tag2,
+        jfloat value2) {
+
+    if (fontPtr == 0) {
+        return nullptr;
+    }
+
+    NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
+
+    // Create temporary glyph handle using shared font data
+    fontsubsetting::GlyphHandle glyphHandle;
+    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
+        return nullptr;
+    }
+
+    // Two axis variations
+    fontsubsetting::Variation variations[2];
+    intToTag(tag1, variations[0].tag);
+    variations[0].value = value1;
+    intToTag(tag2, variations[1].tag);
+    variations[1].value = value2;
+
+    auto glyphPath = glyphHandle.extractPath(variations, 2);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirect3(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint,
+        jint tag1,
+        jfloat value1,
+        jint tag2,
+        jfloat value2,
+        jint tag3,
+        jfloat value3) {
+
+    if (fontPtr == 0) {
+        return nullptr;
+    }
+
+    NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
+
+    // Create temporary glyph handle using shared font data
+    fontsubsetting::GlyphHandle glyphHandle;
+    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
+        return nullptr;
+    }
+
+    // Three axis variations
+    fontsubsetting::Variation variations[3];
+    intToTag(tag1, variations[0].tag);
+    variations[0].value = value1;
+    intToTag(tag2, variations[1].tag);
+    variations[1].value = value2;
+    intToTag(tag3, variations[2].tag);
+    variations[2].value = value3;
+
+    auto glyphPath = glyphHandle.extractPath(variations, 3);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
+JNIEXPORT jfloatArray JNICALL
+Java_com_davidmedenjak_fontsubsetting_runtime_FontPathExtractor_nativeExtractGlyphPathDirectN(
+        JNIEnv *env,
+        jobject /* this */,
+        jlong fontPtr,
+        jint codepoint,
+        jintArray variationTags,
+        jfloatArray variationValues) {
+
+    if (fontPtr == 0) {
+        return nullptr;
+    }
+
+    NativeFontHandle *handle = reinterpret_cast<NativeFontHandle *>(fontPtr);
+
+    // Create temporary glyph handle using shared font data
+    fontsubsetting::GlyphHandle glyphHandle;
+    if (!glyphHandle.initialize(handle->sharedFont, static_cast<unsigned int>(codepoint))) {
+        return nullptr;
+    }
+
+    // Parse variations - stack allocate, max 16 variations
+    fontsubsetting::Variation variations[16];
+    size_t variationCount = 0;
+
+    if (variationTags && variationValues) {
+        jsize tagCount = env->GetArrayLength(variationTags);
+        jsize valueCount = env->GetArrayLength(variationValues);
+
+        if (tagCount == valueCount && tagCount > 0) {
+            jint *tags = env->GetIntArrayElements(variationTags, nullptr);
+            jfloat *values = env->GetFloatArrayElements(variationValues, nullptr);
+            variationCount = tagCount > 16 ? 16 : tagCount;
+
+            for (size_t i = 0; i < variationCount; i++) {
+                intToTag(tags[i], variations[i].tag);
+                variations[i].value = values[i];
+            }
+
+            env->ReleaseIntArrayElements(variationTags, tags, JNI_ABORT);
+            env->ReleaseFloatArrayElements(variationValues, values, JNI_ABORT);
+        }
+    }
+
+    auto glyphPath = glyphHandle.extractPath(variations, variationCount);
+
+    if (glyphPath.isEmpty()) {
+        return nullptr;
+    }
+
+    return packGlyphPathToArray(env, glyphPath);
+}
+
 } // extern "C"

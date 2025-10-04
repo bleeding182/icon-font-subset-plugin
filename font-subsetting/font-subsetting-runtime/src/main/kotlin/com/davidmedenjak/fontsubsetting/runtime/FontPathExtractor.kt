@@ -351,4 +351,112 @@ class FontPathExtractor : AutoCloseable {
             glyphHandlePtr, tag1, value1, tag2, value2, tag3, value3
         )
     }
+
+    // New direct extraction methods using SharedFontData (no per-glyph handles)
+    // These are more efficient as they skip the per-glyph handle management
+
+    /**
+     * Extracts glyph path directly from SharedFontData without axis variations.
+     * Uses the shared HarfBuzz objects for efficiency.
+     */
+    internal fun extractGlyphPathDirect(codepoint: Int): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathDirect0(nativeFontPtr, codepoint)
+    }
+
+    /**
+     * Extracts glyph path directly with 1 axis variation.
+     * Zero allocation, uses shared HarfBuzz objects.
+     */
+    internal fun extractGlyphPathDirect1(
+        codepoint: Int,
+        tag1: Int,
+        value1: Float
+    ): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathDirect1(nativeFontPtr, codepoint, tag1, value1)
+    }
+
+    /**
+     * Extracts glyph path directly with 2 axis variations.
+     * Zero allocation, uses shared HarfBuzz objects.
+     */
+    internal fun extractGlyphPathDirect2(
+        codepoint: Int,
+        tag1: Int,
+        value1: Float,
+        tag2: Int,
+        value2: Float
+    ): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathDirect2(nativeFontPtr, codepoint, tag1, value1, tag2, value2)
+    }
+
+    /**
+     * Extracts glyph path directly with 3 axis variations.
+     * Zero allocation, uses shared HarfBuzz objects.
+     */
+    internal fun extractGlyphPathDirect3(
+        codepoint: Int,
+        tag1: Int,
+        value1: Float,
+        tag2: Int,
+        value2: Float,
+        tag3: Int,
+        value3: Float
+    ): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathDirect3(
+            nativeFontPtr, codepoint, tag1, value1, tag2, value2, tag3, value3
+        )
+    }
+
+    /**
+     * Extracts glyph path directly with N axis variations (fallback for 4+).
+     * Uses array allocation for rare case of many axes.
+     */
+    internal fun extractGlyphPathDirectN(
+        codepoint: Int,
+        tags: IntArray,
+        values: FloatArray
+    ): FloatArray? {
+        checkNotClosed()
+        return nativeExtractGlyphPathDirectN(nativeFontPtr, codepoint, tags, values)
+    }
+
+    // Native methods for direct extraction (using SharedFontData)
+    private external fun nativeExtractGlyphPathDirect0(fontPtr: Long, codepoint: Int): FloatArray?
+    private external fun nativeExtractGlyphPathDirect1(
+        fontPtr: Long,
+        codepoint: Int,
+        tag1: Int,
+        value1: Float
+    ): FloatArray?
+
+    private external fun nativeExtractGlyphPathDirect2(
+        fontPtr: Long,
+        codepoint: Int,
+        tag1: Int,
+        value1: Float,
+        tag2: Int,
+        value2: Float
+    ): FloatArray?
+
+    private external fun nativeExtractGlyphPathDirect3(
+        fontPtr: Long,
+        codepoint: Int,
+        tag1: Int,
+        value1: Float,
+        tag2: Int,
+        value2: Float,
+        tag3: Int,
+        value3: Float
+    ): FloatArray?
+
+    private external fun nativeExtractGlyphPathDirectN(
+        fontPtr: Long,
+        codepoint: Int,
+        tags: IntArray,
+        values: FloatArray
+    ): FloatArray?
 }

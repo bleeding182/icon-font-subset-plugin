@@ -211,6 +211,9 @@ fun rememberFontPathExtractor(inputStream: InputStream): FontPathExtractor? {
  *
  * Represents a glyph with a single cached Compose Path and metrics.
  * The path is reused and refilled directly from native code when axis values or size change.
+ *
+ * This class is lightweight - it just manages the path and axis state. The actual
+ * native HarfBuzz objects are shared via the FontPathExtractor's SharedFontData.
  */
 @Stable
 class GlyphState internal constructor(
@@ -223,9 +226,6 @@ class GlyphState internal constructor(
     // Layer 2: Axis configuration management (using integer tags for efficiency)
     private val axes = mutableMapOf<Int, Float>()
     private var targetSizePx: Float = 0f
-
-    // Cached native glyph handle for efficient axis updates
-    private var nativeGlyphHandle: Long = 0
 
     // Observable state to trigger recomposition when path changes
     private var pathVersion by mutableStateOf(0)
@@ -391,15 +391,11 @@ class GlyphState internal constructor(
      * Internal method that fetches raw data and delegates to PathData.
      *
      * Uses zero-allocation JNI methods for 0-3 axes (covers 95%+ of use cases).
+     * Calls directly through the extractor which uses SharedFontData for efficiency.
      *
      * @return true if successful, false if glyph not found
      */
     private fun updatePath(): Boolean {
-        // Ensure we have a native glyph handle
-        if (nativeGlyphHandle == 0L) {
-            return false
-        }
-
         // Calculate hash of current axes to detect changes
         val currentAxesHash = axes.hashCode()
 
@@ -409,13 +405,13 @@ class GlyphState internal constructor(
             val newRawData = when (axes.size) {
                 0 -> {
                     // No axes - static glyph (zero allocation)
-                    extractor.extractGlyphPathFromHandle0(nativeGlyphHandle)
+                    extractor.extractGlyphPathDirect(codepoint)
                 }
 
                 1 -> {
                     // Single axis (zero allocation)
                     val (tag, value) = axes.entries.first()
-                    extractor.extractGlyphPathFromHandle1(nativeGlyphHandle, tag, value)
+                    extractor.extractGlyphPathDirect1(codepoint, tag, value)
                 }
 
                 2 -> {
@@ -423,8 +419,8 @@ class GlyphState internal constructor(
                     val iter = axes.entries.iterator()
                     val (tag1, value1) = iter.next()
                     val (tag2, value2) = iter.next()
-                    extractor.extractGlyphPathFromHandle2(
-                        nativeGlyphHandle, tag1, value1, tag2, value2
+                    extractor.extractGlyphPathDirect2(
+                        codepoint, tag1, value1, tag2, value2
                     )
                 }
 
@@ -434,8 +430,8 @@ class GlyphState internal constructor(
                     val (tag1, value1) = iter.next()
                     val (tag2, value2) = iter.next()
                     val (tag3, value3) = iter.next()
-                    extractor.extractGlyphPathFromHandle3(
-                        nativeGlyphHandle, tag1, value1, tag2, value2, tag3, value3
+                    extractor.extractGlyphPathDirect3(
+                        codepoint, tag1, value1, tag2, value2, tag3, value3
                     )
                 }
 
@@ -443,7 +439,7 @@ class GlyphState internal constructor(
                     // 4+ axes (rare, fallback to array allocation)
                     val tags = axes.keys.toIntArray()
                     val values = axes.values.toFloatArray()
-                    extractor.extractGlyphPathFromHandle(nativeGlyphHandle, tags, values)
+                    extractor.extractGlyphPathDirectN(codepoint, tags, values)
                 }
             } ?: return false
 
@@ -529,27 +525,10 @@ class GlyphState internal constructor(
         initialAxes: Map<Int, Float> = emptyMap(),
         sizePx: Float = 0f
     ): Boolean {
-        // Create native glyph handle
-        nativeGlyphHandle = extractor.createGlyphHandle(codepoint)
-        if (nativeGlyphHandle == 0L) {
-            return false
-        }
-
         axes.clear()
         axes.putAll(initialAxes)
         targetSizePx = sizePx
         return updatePath()
-    }
-
-    /**
-     * Clean up native resources.
-     * Called when the GlyphState is no longer needed.
-     */
-    internal fun dispose() {
-        if (nativeGlyphHandle != 0L) {
-            extractor.destroyGlyphHandle(nativeGlyphHandle)
-            nativeGlyphHandle = 0
-        }
     }
 
     // Cache to avoid redundant JNI calls and path rebuilds
@@ -620,12 +599,6 @@ fun rememberGlyph(
     LaunchedEffect(extractor, codepoint, sizePx, axes) {
         val glyph = glyphState ?: GlyphState(extractor, codepoint).also { glyphState = it }
         glyph.initialize(axes, sizePx)
-    }
-
-    DisposableEffect(extractor, codepoint) {
-        onDispose {
-            glyphState?.dispose()
-        }
     }
 
     return glyphState
