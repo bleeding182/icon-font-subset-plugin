@@ -1,6 +1,6 @@
-pluginManagement {
+﻿pluginManagement {
     // Include the plugin build for composite builds - must be in pluginManagement for plugin resolution
-    includeBuild("font-subsetting")
+    includeBuild("plugin")
     
     repositories {
         mavenLocal() // For local SNAPSHOT builds
@@ -44,7 +44,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Font Subsetting"
-include(":app")
+include(":demo")
 
 // Include runtime library as a separate build
-includeBuild("font-subsetting/font-subsetting-runtime")
+includeBuild("compose-glyphs")

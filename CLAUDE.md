@@ -6,7 +6,7 @@ Guidance for Claude Code (claude.ai/code) when working with this repository.
 
 - `font-subsetting/` - Gradle plugin with HarfBuzz JNI wrapper
   - `font-subsetting-plugin/` - Main plugin implementation
-  - `font-subsetting-runtime/` - Android library for runtime path extraction and animation
+  - `compose-glyphs/` - Android library for runtime path extraction and animation
   - `src/main/cpp/` - Native C++ code with HarfBuzz integration
   - `src/main/resources/native/` - Pre-built native libraries for all platforms
 - `app/` - Demo Android application using the plugin and runtime
@@ -28,7 +28,7 @@ cd font-subsetting/font-subsetting-plugin
 ./gradlew :app:assembleDebug
 
 # Build runtime library
-./gradlew :font-subsetting:font-subsetting-runtime:assembleDebug
+./gradlew :font-subsetting:compose-glyphs:assembleDebug
 ```
 
 ## Plugin Architecture
@@ -41,7 +41,7 @@ Three Gradle tasks are registered per Android variant:
 
 ## Runtime Library Architecture
 
-The `font-subsetting-runtime` module provides:
+The `compose-glyphs` module provides:
 
 - **FontPathExtractor** - JNI wrapper for extracting vector paths from font glyphs using HarfBuzz
 - **Variable Font Axis Support** - Extract paths at specific axis values (FILL, wght, opsz, etc.)
@@ -173,7 +173,7 @@ plugins {
 
 dependencies {
     // Add runtime library for path extraction and animation
-    implementation(project(":font-subsetting:font-subsetting-runtime"))
+    implementation(project(":font-subsetting:compose-glyphs"))
 }
 
 fontSubsetting {

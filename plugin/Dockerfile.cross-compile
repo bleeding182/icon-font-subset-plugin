@@ -1,0 +1,219 @@
+# Multi-stage Docker image for cross-compiling native libraries
+# Optimized for size and build caching
+
+# ============================================================================
+# Stage 1: Base image with build tools and toolchains
+# ============================================================================
+FROM ubuntu:18.04 AS base-builder
+
+# Version variables for easy updates
+ARG HARFBUZZ_VERSION=10.0.1
+ARG ZIG_VERSION=0.13.0
+ARG CMAKE_VERSION=3.16.9
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install all build tools in one layer with cache mount
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
+    build-essential \
+    ninja-build \
+    git \
+    wget \
+    mingw-w64 \
+    openjdk-11-jdk \
+    pkg-config \
+    autoconf \
+    automake \
+    libtool \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install CMake (Ubuntu 18.04 ships 3.10, HarfBuzz needs 3.12+)
+RUN cd /tmp && \
+    wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.sh && \
+    sh cmake-${CMAKE_VERSION}-Linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-${CMAKE_VERSION}-Linux-x86_64.sh && \
+    cmake --version
+
+# Set JAVA_HOME
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+# Verify Java installation
+RUN java -version && javac -version
+
+# Install Zig for macOS cross-compilation
+RUN cd /tmp && \
+    wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz && \
+    tar xf zig-linux-x86_64-${ZIG_VERSION}.tar.xz && \
+    mv zig-linux-x86_64-${ZIG_VERSION} /opt/zig && \
+    ln -s /opt/zig/zig /usr/local/bin/zig && \
+    rm zig-linux-x86_64-${ZIG_VERSION}.tar.xz && \
+    zig version
+
+# Create Zig wrapper scripts for macOS cross-compilation
+RUN mkdir -p /usr/local/bin && \
+    # Zig CC wrappers for macOS \
+    printf '#!/bin/sh\nexec zig cc -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig cc -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-aarch64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-aarch64-macos && \
+    printf '#!/bin/sh\nzig ar "$@"\n' > /usr/local/bin/zig-ar && \
+    printf '#!/bin/sh\nzig ranlib "$@"\n' > /usr/local/bin/zig-ranlib && \
+    chmod +x /usr/local/bin/zig-*
+
+# Copy toolchain files from repository (instead of generating them)
+COPY cmake/toolchains /toolchains
+
+# ============================================================================
+# Stage 2: Build HarfBuzz for all platforms
+# ============================================================================
+FROM base-builder AS harfbuzz-builder
+
+ARG HARFBUZZ_VERSION=10.0.1
+
+# Clone HarfBuzz once (reused for all platforms)
+RUN cd /tmp && \
+    git clone --depth 1 --branch ${HARFBUZZ_VERSION} https://github.com/harfbuzz/harfbuzz.git
+
+# Build HarfBuzz for Linux (native, targets glibc 2.27)
+# Size optimization flags explained:
+# - HB_NO_FALLBACK_SHAPE: Removes unused fallback shaper (we only use OT subsetting)
+# - HB_NO_MT: Disables thread-safety (not needed for JNI single-threaded usage)
+# Note: Cannot use HB_LEAN as it disables variable font APIs we need for axis manipulation
+RUN mkdir -p /tmp/harfbuzz/build-linux && cd /tmp/harfbuzz/build-linux && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    strip --strip-unneeded /usr/local/lib/libharfbuzz*.a
+
+# Build HarfBuzz for Windows (MinGW)
+RUN mkdir -p /tmp/harfbuzz/build-windows && cd /tmp/harfbuzz/build-windows && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_UNISCRIBE=OFF \
+        -DHB_HAVE_DIRECTWRITE=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/windows-x86_64.cmake \
+        -DCMAKE_INSTALL_PREFIX=/usr/x86_64-w64-mingw32 \
+        -G Ninja && \
+    ninja && \
+    ninja install && \
+    x86_64-w64-mingw32-strip --strip-unneeded /usr/x86_64-w64-mingw32/lib/libharfbuzz*.a
+
+# Build HarfBuzz for macOS x86_64 (Zig)
+RUN mkdir -p /tmp/harfbuzz/build-darwin-x86_64 && cd /tmp/harfbuzz/build-darwin-x86_64 && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_CORETEXT=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/darwin-x86_64.cmake \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/darwin-x86_64 \
+        -G Ninja && \
+    ninja && \
+    ninja install
+
+# Build HarfBuzz for macOS ARM64 (Zig)
+RUN mkdir -p /tmp/harfbuzz/build-darwin-aarch64 && cd /tmp/harfbuzz/build-darwin-aarch64 && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=MinSizeRel \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_C_FLAGS="-Os -ffunction-sections -fdata-sections -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DCMAKE_CXX_FLAGS="-Os -ffunction-sections -fdata-sections -fno-exceptions -fno-rtti -DHB_NO_FALLBACK_SHAPE -DHB_NO_MT" \
+        -DHB_HAVE_FREETYPE=OFF \
+        -DHB_HAVE_GLIB=OFF \
+        -DHB_HAVE_GOBJECT=OFF \
+        -DHB_HAVE_ICU=OFF \
+        -DHB_HAVE_GRAPHITE2=OFF \
+        -DHB_HAVE_CORETEXT=OFF \
+        -DHB_BUILD_TESTS=OFF \
+        -DHB_BUILD_UTILS=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_TOOLCHAIN_FILE=/toolchains/darwin-aarch64.cmake \
+        -DCMAKE_INSTALL_PREFIX=/usr/local/darwin-aarch64 \
+        -G Ninja && \
+    ninja && \
+    ninja install
+
+# ============================================================================
+# Stage 3: Final minimal runtime image
+# ============================================================================
+FROM ubuntu:18.04 AS runtime
+
+# Install only runtime dependencies needed for the build script
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    ninja-build \
+    openjdk-11-jdk \
+    mingw-w64 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Zig (needed for macOS builds)
+COPY --from=base-builder /opt/zig /opt/zig
+RUN ln -s /opt/zig/zig /usr/local/bin/zig
+
+# Copy Zig wrapper scripts
+COPY --from=base-builder /usr/local/bin/zig-* /usr/local/bin/
+
+# Copy CMake binaries and modules
+COPY --from=base-builder /usr/local/bin/cmake /usr/local/bin/cmake
+COPY --from=base-builder /usr/local/bin/ctest /usr/local/bin/ctest
+COPY --from=base-builder /usr/local/bin/cpack /usr/local/bin/cpack
+COPY --from=base-builder /usr/local/share/cmake-3.16 /usr/local/share/cmake-3.16
+
+# Copy all HarfBuzz artifacts from builder stage
+COPY --from=harfbuzz-builder /usr/local/lib/libharfbuzz*.a /usr/local/lib/
+COPY --from=harfbuzz-builder /usr/local/include/harfbuzz /usr/local/include/harfbuzz
+COPY --from=harfbuzz-builder /usr/x86_64-w64-mingw32/lib/libharfbuzz*.a /usr/x86_64-w64-mingw32/lib/
+COPY --from=harfbuzz-builder /usr/x86_64-w64-mingw32/include/harfbuzz /usr/x86_64-w64-mingw32/include/harfbuzz
+COPY --from=harfbuzz-builder /usr/local/darwin-x86_64/lib/libharfbuzz*.a /usr/local/darwin-x86_64/lib/
+COPY --from=harfbuzz-builder /usr/local/darwin-x86_64/include/harfbuzz /usr/local/darwin-x86_64/include/harfbuzz
+COPY --from=harfbuzz-builder /usr/local/darwin-aarch64/lib/libharfbuzz*.a /usr/local/darwin-aarch64/lib/
+COPY --from=harfbuzz-builder /usr/local/darwin-aarch64/include/harfbuzz /usr/local/darwin-aarch64/include/harfbuzz
+
+# Copy toolchain files
+COPY --from=base-builder /toolchains /toolchains
+
+# Set environment
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+WORKDIR /workspace
+
+CMD ["/bin/bash"]
