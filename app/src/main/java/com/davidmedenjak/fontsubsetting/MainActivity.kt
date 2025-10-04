@@ -113,7 +113,7 @@ fun MainScreenPreview() {
     }
 }
 
-// Icon list for the demo - 20 icons (4x5 grid)
+// Icon list for the demo - 40 icons (8x5 grid)
 private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.home to "home",
     MaterialSymbols.favorite to "favorite",
@@ -134,7 +134,27 @@ private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.lock to "lock",
     MaterialSymbols.person to "person",
     MaterialSymbols.cloud to "cloud",
-    MaterialSymbols.info to "info"
+    MaterialSymbols.info to "info",
+    MaterialSymbols.add to "add",
+    MaterialSymbols.remove to "remove",
+    MaterialSymbols.update to "update",
+    MaterialSymbols.download to "download",
+    MaterialSymbols.upload to "upload",
+    MaterialSymbols.contentCopy to "content_copy",
+    MaterialSymbols.contentPaste to "content_paste",
+    MaterialSymbols.cut to "cut",
+    MaterialSymbols.undo to "undo",
+    MaterialSymbols.redo to "redo",
+    MaterialSymbols.save to "save",
+    MaterialSymbols.print to "print",
+    MaterialSymbols.linkOff to "link_off",
+    MaterialSymbols.help to "help",
+    MaterialSymbols.flag to "flag",
+    MaterialSymbols.warning to "warning",
+    MaterialSymbols.error to "error",
+    MaterialSymbols.check to "check",
+    MaterialSymbols.close to "close",
+    MaterialSymbols.cleanHands to "cleanHands",
 )
 
 @Composable
@@ -281,7 +301,7 @@ fun IconGridDemo(
         Spacer(modifier = Modifier.height(16.dp))
 
         LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
+            columns = GridCells.Fixed(8),
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(4.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -304,7 +324,7 @@ fun NativeIconCard(
         Text(
             text = icon,
             fontFamily = fontFamily,
-            fontSize = 40.sp,
+            fontSize = 20.sp,
             color = MaterialTheme.colorScheme.onSecondaryContainer,
             textAlign = TextAlign.Center
         )
@@ -322,7 +342,7 @@ fun GlyphIconCard(
     val glyph = rememberGlyph(
         extractor = pathExtractor,
         char = char,
-        size = 40.dp
+        size = 20.dp
     )
 
     // Use LaunchedEffect to update axes when fill or grade change
@@ -338,7 +358,7 @@ fun GlyphIconCard(
         glyph?.let {
             Glyph(
                 glyph = it,
-                size = 40.dp,
+                size = 20.dp,
                 tint = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
