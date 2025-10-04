@@ -147,11 +147,6 @@ class GlyphState internal constructor(
     val advanceWidth: Float get() = pathData.advanceWidth
 
     /**
-     * Advance height for text layout
-     */
-    val advanceHeight: Float get() = pathData.advanceHeight
-
-    /**
      * Units per EM from the font
      */
     val unitsPerEm: Int get() = pathData.unitsPerEm
@@ -274,13 +269,13 @@ class GlyphState internal constructor(
         } ?: return false
 
         // Validate minimum size for header
-        if (rawData.size < 8) return false
+        if (rawData.size < 7) return false
 
-        // Parse header to get bounding box: [numCommands, advanceWidth, advanceHeight, unitsPerEm, minX, minY, maxX, maxY]
-        val glyphMinX = rawData[4]
-        val glyphMinY = rawData[5]
-        val glyphMaxX = rawData[6]
-        val glyphMaxY = rawData[7]
+        // Parse header to get bounding box: [numCommands, advanceWidth, unitsPerEm, minX, minY, maxX, maxY]
+        val glyphMinX = rawData[3]
+        val glyphMinY = rawData[4]
+        val glyphMaxX = rawData[5]
+        val glyphMaxY = rawData[6]
 
         // Calculate transformation for the target size
         val glyphCenterX = (glyphMinX + glyphMaxX) / 2f

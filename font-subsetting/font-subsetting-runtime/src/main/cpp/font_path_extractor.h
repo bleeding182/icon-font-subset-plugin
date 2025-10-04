@@ -48,14 +48,14 @@ namespace fontsubsetting {
     struct GlyphPath {
         PathCommandArray commands;
         float advanceWidth;
-        float advanceHeight;
         int unitsPerEm;
         float minX, minY, maxX, maxY;  // Bounding box
 
         GlyphPath();
 
         ~GlyphPath();
-        bool isEmpty() const { return commands.empty(); }
+
+        inline bool isEmpty() const { return commands.empty(); }
     };
 
 /**

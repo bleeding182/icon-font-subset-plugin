@@ -1,12 +1,8 @@
 #include "font_path_extractor.h"
 #include <hb.h>
-#include <hb-ot.h>
 #include <android/log.h>
-#include <cmath>
-#include <cstring>
 #include <cstdlib>
 #include <cfloat>
-#include <algorithm>
 
 #define LOG_TAG "FontPathExtractor"
 
@@ -20,6 +16,13 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #endif
+
+// Lightweight min/max to avoid <algorithm> header bloat
+template<typename T>
+static inline T min(T a, T b) { return a < b ? a : b; }
+
+template<typename T>
+static inline T max(T a, T b) { return a > b ? a : b; }
 
 namespace fontsubsetting {
 
@@ -44,14 +47,14 @@ namespace fontsubsetting {
         }
     };
 
-// RAII wrapper for HarfBuzz buffer
-    struct HBBufferDeleter {
-        void operator()(hb_buffer_t *buffer) const {
-            if (buffer) hb_buffer_destroy(buffer);
+// RAII wrapper for HarfBuzz draw funcs
+    struct HBDrawFuncsDeleter {
+        void operator()(hb_draw_funcs_t *funcs) const {
+            if (funcs) hb_draw_funcs_destroy(funcs);
         }
     };
 
-    // Context for path drawing callbacks
+// Context for path drawing callbacks
     struct PathDrawContext {
         PathCommandArray *commands;
     };
@@ -63,40 +66,40 @@ namespace fontsubsetting {
         if (data) {
             free(data);
             data = nullptr;
-        }
-        size = 0;
-        capacity = 0;
     }
+    size = 0;
+    capacity = 0;
+}
 
     void PathCommandArray::reserve(size_t new_capacity) {
         if (new_capacity <= capacity) return;
 
-        PathCommand *new_data = (PathCommand *) realloc(data, new_capacity * sizeof(PathCommand));
-        if (!new_data) {
-            LOGE("Failed to allocate memory for path commands");
-            return;
-        }
-        data = new_data;
-        capacity = new_capacity;
+    PathCommand *new_data = (PathCommand *) realloc(data, new_capacity * sizeof(PathCommand));
+    if (!new_data) {
+        LOGE("Failed to allocate memory for path commands");
+        return;
     }
+    data = new_data;
+    capacity = new_capacity;
+}
 
     void PathCommandArray::push_back(const PathCommand &cmd) {
         if (size >= capacity) {
             size_t new_capacity = capacity == 0 ? 8 : capacity * 2;
             reserve(new_capacity);
-        }
-        if (size < capacity) {
-            data[size++] = cmd;
-        }
     }
+    if (size < capacity) {
+        data[size++] = cmd;
+    }
+}
 
     void PathCommandArray::clear() {
         size = 0;
     }
 
-// GlyphPath implementation
+    // GlyphPath implementation
     GlyphPath::GlyphPath()
-            : advanceWidth(0), advanceHeight(0), unitsPerEm(0),
+            : advanceWidth(0), unitsPerEm(0),
               minX(0), minY(0), maxX(0), maxY(0) {}
 
     GlyphPath::~GlyphPath() {}
@@ -199,17 +202,15 @@ namespace fontsubsetting {
             LOGE("Failed to create blob");
             return result;
         }
-        HBBlobDeleter blob_deleter;
 
         // Create face
         hb_face_t *face = hb_face_create(blob, 0);
-        blob_deleter(blob); // Clean up blob
+        hb_blob_destroy(blob); // Clean up blob immediately
 
         if (!face) {
             LOGE("Failed to create face");
             return result;
         }
-        HBFaceDeleter face_deleter;
 
         // Get units per EM - this is our coordinate system
         unsigned int upem = hb_face_get_upem(face);
@@ -219,10 +220,9 @@ namespace fontsubsetting {
         hb_font_t *font = hb_font_create(face);
         if (!font) {
             LOGE("Failed to create font");
-            face_deleter(face);
+            hb_face_destroy(face);
             return result;
         }
-        HBFontDeleter font_deleter;
 
         // Apply variable font variations if provided
         if (variationCount > 0 && variations) {
@@ -247,15 +247,14 @@ namespace fontsubsetting {
             hb_font_set_variations(font, hb_variations, actual_count);
         }
 
-        // Create buffer
+        // Create buffer for shaping (needed to apply RVRN feature for variable fonts)
         hb_buffer_t *buffer = hb_buffer_create();
         if (!buffer) {
             LOGE("Failed to create buffer");
-            font_deleter(font);
-            face_deleter(face);
+            hb_font_destroy(font);
+            hb_face_destroy(face);
             return result;
         }
-        HBBufferDeleter buffer_deleter;
 
         // Add codepoint to buffer
         hb_buffer_add(buffer, codepoint, 0);
@@ -264,6 +263,7 @@ namespace fontsubsetting {
         hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
 
         // Shape the buffer - this applies OpenType features including RVRN
+        // RVRN (Required Variation Substitutions) is crucial for variable fonts
         hb_shape(font, buffer, nullptr, 0);
 
         // Get glyph info from shaped buffer
@@ -272,9 +272,9 @@ namespace fontsubsetting {
 
         if (glyph_count == 0 || !glyph_info) {
             LOGD("Glyph not found for codepoint U+%04X", codepoint);
-            buffer_deleter(buffer);
-            font_deleter(font);
-            face_deleter(face);
+            hb_buffer_destroy(buffer);
+            hb_font_destroy(font);
+            hb_face_destroy(face);
             return result;
         }
 
@@ -285,20 +285,18 @@ namespace fontsubsetting {
 
         // Get glyph metrics (in font units)
         hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
-        hb_position_t advance_height = hb_font_get_glyph_v_advance(font, glyph_id);
 
         // Normalize to 0-1 range based on upem
         float scale = 1.0f / static_cast<float>(upem);
         result.advanceWidth = static_cast<float>(advance_width) * scale;
-        result.advanceHeight = static_cast<float>(advance_height) * scale;
 
         // Create draw funcs for path extraction
         hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
             LOGE("Failed to create draw funcs");
-            buffer_deleter(buffer);
-            font_deleter(font);
-            face_deleter(face);
+            hb_buffer_destroy(buffer);
+            hb_font_destroy(font);
+            hb_face_destroy(face);
             return result;
         }
 
@@ -363,36 +361,36 @@ namespace fontsubsetting {
             switch (cmd.type) {
                 case PathCommand::MOVE_TO:
                 case PathCommand::LINE_TO:
-                    pathMinX = std::min(pathMinX, cmd.x1);
-                    pathMinY = std::min(pathMinY, cmd.y1);
-                    pathMaxX = std::max(pathMaxX, cmd.x1);
-                    pathMaxY = std::max(pathMaxY, cmd.y1);
+                    pathMinX = min(pathMinX, cmd.x1);
+                    pathMinY = min(pathMinY, cmd.y1);
+                    pathMaxX = max(pathMaxX, cmd.x1);
+                    pathMaxY = max(pathMaxY, cmd.y1);
                     break;
 
                 case PathCommand::QUADRATIC_TO:
-                    pathMinX = std::min(pathMinX, cmd.x1);
-                    pathMinY = std::min(pathMinY, cmd.y1);
-                    pathMaxX = std::max(pathMaxX, cmd.x1);
-                    pathMaxY = std::max(pathMaxY, cmd.y1);
-                    pathMinX = std::min(pathMinX, cmd.x2);
-                    pathMinY = std::min(pathMinY, cmd.y2);
-                    pathMaxX = std::max(pathMaxX, cmd.x2);
-                    pathMaxY = std::max(pathMaxY, cmd.y2);
+                    pathMinX = min(pathMinX, cmd.x1);
+                    pathMinY = min(pathMinY, cmd.y1);
+                    pathMaxX = max(pathMaxX, cmd.x1);
+                    pathMaxY = max(pathMaxY, cmd.y1);
+                    pathMinX = min(pathMinX, cmd.x2);
+                    pathMinY = min(pathMinY, cmd.y2);
+                    pathMaxX = max(pathMaxX, cmd.x2);
+                    pathMaxY = max(pathMaxY, cmd.y2);
                     break;
 
                 case PathCommand::CUBIC_TO:
-                    pathMinX = std::min(pathMinX, cmd.x1);
-                    pathMinY = std::min(pathMinY, cmd.y1);
-                    pathMaxX = std::max(pathMaxX, cmd.x1);
-                    pathMaxY = std::max(pathMaxY, cmd.y1);
-                    pathMinX = std::min(pathMinX, cmd.x2);
-                    pathMinY = std::min(pathMinY, cmd.y2);
-                    pathMaxX = std::max(pathMaxX, cmd.x2);
-                    pathMaxY = std::max(pathMaxY, cmd.y2);
-                    pathMinX = std::min(pathMinX, cmd.x3);
-                    pathMinY = std::min(pathMinY, cmd.y3);
-                    pathMaxX = std::max(pathMaxX, cmd.x3);
-                    pathMaxY = std::max(pathMaxY, cmd.y3);
+                    pathMinX = min(pathMinX, cmd.x1);
+                    pathMinY = min(pathMinY, cmd.y1);
+                    pathMaxX = max(pathMaxX, cmd.x1);
+                    pathMaxY = max(pathMaxY, cmd.y1);
+                    pathMinX = min(pathMinX, cmd.x2);
+                    pathMinY = min(pathMinY, cmd.y2);
+                    pathMaxX = max(pathMaxX, cmd.x2);
+                    pathMaxY = max(pathMaxY, cmd.y2);
+                    pathMinX = min(pathMinX, cmd.x3);
+                    pathMinY = min(pathMinY, cmd.y3);
+                    pathMaxX = max(pathMaxX, cmd.x3);
+                    pathMaxY = max(pathMaxY, cmd.y3);
                     break;
 
                 case PathCommand::CLOSE:
@@ -412,9 +410,9 @@ namespace fontsubsetting {
 
         // Clean up
         hb_draw_funcs_destroy(draw_funcs);
-        buffer_deleter(buffer);
-        font_deleter(font);
-        face_deleter(face);
+        hb_buffer_destroy(buffer);
+        hb_font_destroy(font);
+        hb_face_destroy(face);
 
         LOGD("Extracted %zu path commands for codepoint U+%04X (glyph %u) with %zu variations",
              result.commands.size, codepoint, glyph_id, variationCount);

@@ -36,8 +36,6 @@ internal class PathData {
     // Glyph metrics
     var advanceWidth: Float = 0f
         private set
-    var advanceHeight: Float = 0f
-        private set
     var unitsPerEm: Int = 0
         private set
     var minX: Float = 0f
@@ -79,17 +77,16 @@ internal class PathData {
         translateY: Float = 0f
     ): Boolean {
         // Validate minimum size for header
-        if (rawData.size < 8) return false
+        if (rawData.size < 7) return false
 
-        // Parse header: [numCommands, advanceWidth, advanceHeight, unitsPerEm, minX, minY, maxX, maxY]
+        // Parse header: [numCommands, advanceWidth, unitsPerEm, minX, minY, maxX, maxY]
         val numCommands = rawData[0].toInt()
         advanceWidth = rawData[1]
-        advanceHeight = rawData[2]
-        unitsPerEm = rawData[3].toInt()
-        minX = rawData[4]
-        minY = rawData[5]
-        maxX = rawData[6]
-        maxY = rawData[7]
+        unitsPerEm = rawData[2].toInt()
+        minX = rawData[3]
+        minY = rawData[4]
+        maxX = rawData[5]
+        maxY = rawData[6]
 
         // Rewind the existing path for reuse
         composePath.rewind()
@@ -97,7 +94,7 @@ internal class PathData {
 
         // Fill path directly from raw command data with transformations applied
         // Each command: [type, x1, y1, x2, y2, x3, y3]
-        var offset = 8
+        var offset = 7
         for (i in 0 until numCommands) {
             if (offset + 7 > rawData.size) break
 
