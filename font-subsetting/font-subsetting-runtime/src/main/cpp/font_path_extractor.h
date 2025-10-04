@@ -1,7 +1,9 @@
 #ifndef FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 #define FONTSUBSETTING_RUNTIME_FONT_PATH_EXTRACTOR_H
 
-#include <stddef.h>
+// Direct typedef to avoid including <stddef.h>
+typedef __SIZE_TYPE__ size_t;
+
 #include <hb.h>
 
 namespace fontsubsetting {

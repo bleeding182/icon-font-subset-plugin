@@ -1,7 +1,15 @@
 #include "font_path_extractor.h"
 #include <hb.h>
-#include <cstdlib>
-#include <cfloat>
+
+// Direct declarations to avoid including <cstdlib>
+extern "C" {
+void *malloc(unsigned long);
+void free(void *);
+void *realloc(void *, unsigned long);
+}
+
+// Direct constant definition to avoid including <cfloat>
+#define FLT_MAX 3.40282347e+38F
 
 // Lightweight min/max to avoid <algorithm> header bloat
 template<typename T>

@@ -1,6 +1,13 @@
 #include <jni.h>
-#include <cstdlib>
-#include <cstring>
+
+// Direct declarations to avoid including <cstdlib> and <cstring>
+extern "C" {
+void *malloc(size_t);
+void free(void *);
+void *memcpy(void *, const void *, size_t);
+void *realloc(void *, size_t);
+}
+
 #include "font_path_extractor.h"
 
 // Native font handle structure - stores font data in native memory
