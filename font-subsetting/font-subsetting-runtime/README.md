@@ -11,7 +11,7 @@ full variable font axis support.
 - Built-in animation support for path drawing effects
 - **Path morphing** - Animate between different axis values
 - Minimal overhead - only extracts paths for used glyphs
-- Native performance with HarfBuzz 10.0.1
+- Native performance with HarfBuzz
 - Optimized rendering with path reuse and efficient recomposition
 
 ## Installation
@@ -244,8 +244,8 @@ Auto-animated morphing between two paths.
 ## How It Works
 
 1. Font data is loaded from resources or files
-2. HarfBuzz extracts the glyph outline using the draw funcs API
-3. Variable font variations are applied via `hb_font_set_variations()` before extraction
+2. HarfBuzz extracts the glyph outline
+3. Variable font variations are applied via HarfBuzz's API before extraction
 4. Path commands are normalized to 0-1 coordinate space
 5. Commands are passed through JNI to Kotlin
 6. Kotlin converts them to Compose `Path` objects
@@ -312,15 +312,15 @@ We only use HarfBuzz for path extraction, not text shaping. Disabled features:
 - **HB_NO_BUFFER_MESSAGE**: No buffer messages
 - **HB_NO_PAINT**: No COLR/CPAL paint API
 - **HB_NO_SUBSET_LAYOUT**: We don't subset fonts
-- Disabled: FreeType, Glib, ICU, Graphite2, CoreText, Uniscribe, DirectWrite, GDI
+- Disabled: Glib, ICU, Graphite2, CoreText, Uniscribe, DirectWrite, GDI
 
 **Note**: `HB_MINI` and `HB_LEAN` are too aggressive - they disable the drawing API (`hb_draw_*`)
 that we require for path extraction.
 
 ### Current Size
 
-- **~472 KB per architecture** (stripped, optimized)
-- **~1.8 MB total** for 4 architectures (armeabi-v7a, arm64-v8a, x86, x86_64)
+- **~150-200 KB per architecture** (stripped, optimized)
+- **~600-800 KB total** for 4 architectures (armeabi-v7a, arm64-v8a, x86, x86_64)
 
 ### Further Size Reduction Options
 
@@ -333,7 +333,7 @@ ndk {
 }
 ```
 
-**Savings**: ~75% reduction in total library size (~450 KB total instead of 1.8 MB)
+**Savings**: ~75% reduction in total library size (~150-200 KB total instead of 600-800 KB)
 
 #### 2. Remove Variable Font Support (if not needed)
 
@@ -369,9 +369,9 @@ packagingOptions {
 
 | Configuration     | Size per arch | Total (4 archs) | Coverage                         |
 |-------------------|---------------|-----------------|----------------------------------|
-| Current           | ~472 KB       | ~1.8 MB         | All devices                      |
-| arm64-only        | ~472 KB       | ~472 KB         | 95%+ devices                     |
-| arm64 + HB_NO_VAR | ~450 KB       | ~450 KB         | 95%+ devices (no variable fonts) |
+| Current           | ~150-200 KB   | ~600-800 KB     | All devices                      |
+| arm64-only        | ~150-200 KB   | ~150-200 KB     | 95%+ devices                     |
+| arm64 + HB_NO_VAR | ~120-150 KB   | ~120-150 KB     | 95%+ devices (no variable fonts) |
 
 ### What We Cannot Remove
 
@@ -405,7 +405,7 @@ Native libraries are built automatically via CMake when compiling the Android li
 
 - **Minimum SDK**: 24 (Android 7.0)
 - **Compile SDK**: 36
-- **HarfBuzz**: 10.0.1 (bundled)
+- **HarfBuzz**: Bundled
 - **Jetpack Compose**: Required for rendering
 
 ## Demo Application

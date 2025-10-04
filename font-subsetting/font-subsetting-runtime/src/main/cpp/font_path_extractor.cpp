@@ -44,7 +44,14 @@ namespace fontsubsetting {
         }
     };
 
-// Context for path drawing callbacks
+// RAII wrapper for HarfBuzz buffer
+    struct HBBufferDeleter {
+        void operator()(hb_buffer_t *buffer) const {
+            if (buffer) hb_buffer_destroy(buffer);
+        }
+    };
+
+    // Context for path drawing callbacks
     struct PathDrawContext {
         PathCommandArray *commands;
     };
@@ -240,14 +247,41 @@ namespace fontsubsetting {
             hb_font_set_variations(font, hb_variations, actual_count);
         }
 
-        // Get glyph ID from codepoint
-        hb_codepoint_t glyph_id;
-        if (!hb_font_get_nominal_glyph(font, codepoint, &glyph_id)) {
-            LOGD("Glyph not found for codepoint U+%04X", codepoint);
+        // Create buffer
+        hb_buffer_t *buffer = hb_buffer_create();
+        if (!buffer) {
+            LOGE("Failed to create buffer");
             font_deleter(font);
             face_deleter(face);
             return result;
         }
+        HBBufferDeleter buffer_deleter;
+
+        // Add codepoint to buffer
+        hb_buffer_add(buffer, codepoint, 0);
+        hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
+        hb_buffer_set_script(buffer, HB_SCRIPT_COMMON);
+        hb_buffer_set_language(buffer, hb_language_from_string("en", -1));
+
+        // Shape the buffer - this applies OpenType features including RVRN
+        hb_shape(font, buffer, nullptr, 0);
+
+        // Get glyph info from shaped buffer
+        unsigned int glyph_count;
+        hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buffer, &glyph_count);
+
+        if (glyph_count == 0 || !glyph_info) {
+            LOGD("Glyph not found for codepoint U+%04X", codepoint);
+            buffer_deleter(buffer);
+            font_deleter(font);
+            face_deleter(face);
+            return result;
+        }
+
+        // Get the actual glyph ID after shaping (may be substituted by RVRN)
+        hb_codepoint_t glyph_id = glyph_info[0].codepoint;
+
+        LOGD("Codepoint U+%04X shaped to glyph %u", codepoint, glyph_id);
 
         // Get glyph metrics (in font units)
         hb_position_t advance_width = hb_font_get_glyph_h_advance(font, glyph_id);
@@ -262,6 +296,7 @@ namespace fontsubsetting {
         hb_draw_funcs_t *draw_funcs = hb_draw_funcs_create();
         if (!draw_funcs) {
             LOGE("Failed to create draw funcs");
+            buffer_deleter(buffer);
             font_deleter(font);
             face_deleter(face);
             return result;
@@ -377,6 +412,7 @@ namespace fontsubsetting {
 
         // Clean up
         hb_draw_funcs_destroy(draw_funcs);
+        buffer_deleter(buffer);
         font_deleter(font);
         face_deleter(face);
 

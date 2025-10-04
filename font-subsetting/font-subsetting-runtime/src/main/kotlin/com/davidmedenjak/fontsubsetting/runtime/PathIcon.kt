@@ -13,7 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawStyle
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -413,7 +413,7 @@ fun Glyph(
     size: Dp,
     modifier: Modifier = Modifier,
     tint: Color = Color.Black,
-    style: DrawStyle = Stroke(1f)
+    style: DrawStyle = Fill
 ) {
     Canvas(modifier = modifier.size(size)) {
         // Path is already scaled and centered in pixel space - just draw it!
