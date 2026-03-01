@@ -54,11 +54,20 @@ jobs:
         with:
           context: plugin
           file: plugin/Dockerfile.cross-compile
-          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+          push: false
           load: true
-          tags: |
-            fontsubsetting-cross-compiler:local
-            ${{ env.REGISTRY }}/${{ github.repository_owner }}/fontsubsetting-cross-compiler:latest
+          tags: fontsubsetting-cross-compiler:local
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Push Docker image to GHCR
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        uses: docker/build-push-action@v6
+        with:
+          context: plugin
+          file: plugin/Dockerfile.cross-compile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ github.repository_owner }}/fontsubsetting-cross-compiler:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
