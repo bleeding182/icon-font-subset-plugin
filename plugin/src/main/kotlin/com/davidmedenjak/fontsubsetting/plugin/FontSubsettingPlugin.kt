@@ -9,6 +9,7 @@ import com.davidmedenjak.fontsubsetting.plugin.tasks.FontSubsettingTask
 import com.davidmedenjak.fontsubsetting.plugin.tasks.GenerateIconConstantsTask
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.file.Directory
 import org.gradle.api.provider.Provider
 import org.gradle.api.tasks.TaskProvider
 
@@ -177,15 +178,18 @@ class FontSubsettingPlugin : Plugin<Project> {
     }
 
     private fun configureSourceSets(variant: Variant, project: Project, task: AnalyzeIconUsageTask) {
-        variant.sources.java?.all?.let { allSourcesProvider ->
+        fun addStaticSources(sourcesProvider: Provider<out Collection<Directory>>) {
             task.sourceFiles.from(
-                allSourcesProvider.map { directories ->
+                sourcesProvider.map { directories ->
                     directories.map { dir ->
                         project.fileTree(dir.asFile) { it.include("**/*.kt") }
                     }
                 }
             )
         }
+
+        variant.sources.java?.static?.let { addStaticSources(it) }
+        variant.sources.kotlin?.static?.let { addStaticSources(it) }
     }
 
     private fun registerSubsetTask(
