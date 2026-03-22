@@ -1,27 +1,43 @@
 package com.davidmedenjak.fontsubsetting
 
+import android.content.Context
 import android.graphics.Paint
 import android.graphics.Paint.FontMetrics
+import android.graphics.Path
 import android.graphics.Typeface
 import android.os.Build
+import android.view.WindowManager
 import androidx.annotation.FontRes
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.size
+import androidx.compose.animation.core.Easing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.util.lerp
 import androidx.core.content.res.ResourcesCompat
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /**
- * Lightweight wrapper around a [Typeface] for use with the [Glyph] composable.
+ * Lightweight wrapper around a [Typeface] for use with [GlyphPainter].
  */
 @Immutable
 class GlyphFont internal constructor(val typeface: Typeface)
@@ -61,95 +77,204 @@ fun buildFontVariationSettings(vararg axes: Pair<String, Float>): String? {
 }
 
 /**
- * Renders a font glyph as an icon using Android's Paint + Canvas.
+ * A [Painter] that renders a font glyph using Android's Paint + Canvas.
  *
  * Uses dp sizing (not sp) so icons don't scale with text size preferences.
  * Variable font axes are applied via [Paint.fontVariationSettings] on API 26+;
  * on API 24-25, icons render with the font's default axis values.
  *
- * This is the primary overload — accepts a pre-built variation settings string
- * for zero-allocation rendering during animation. Use [buildFontVariationSettings]
- * to create the string, wrapped in `remember(...)` at the call site.
+ * Glyph outlines are cached as [Path] objects at a fixed reference size.
+ * After the first encounter of each variation setting, subsequent draws use
+ * the cached path scaled to the target size, avoiding repeated font variation
+ * interpolation and text shaping.
+ */
+@Stable
+class GlyphPainter(
+    private val text: String,
+    typeface: Typeface,
+) : Painter() {
+
+    private val referenceSizePx = 100f
+
+    /** Paint used to extract glyph paths at the reference size. */
+    private val extractPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textAlign = Paint.Align.CENTER
+        this.typeface = typeface
+        textSize = referenceSizePx
+    }
+
+    /** Paint used to draw cached paths (color only, no font config needed). */
+    private val drawPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+    /** Cached glyph outlines keyed by variation settings string. */
+    private val pathCache = HashMap<String?, Path>()
+
+    /** Baseline Y at the reference size, for vertically centering the glyph. */
+    private val referenceBaselineY: Float
+
+    init {
+        val metrics = FontMetrics()
+        extractPaint.getFontMetrics(metrics)
+        referenceBaselineY = (referenceSizePx - (metrics.ascent + metrics.descent)) / 2f
+    }
+
+    private var _tint = mutableStateOf(Color.Black)
+    var tint: Color
+        get() = _tint.value
+        set(value) {
+            if (_tint.value != value) {
+                _tint.value = value
+                drawPaint.color = value.toArgb()
+            }
+        }
+
+    private var _fontVariationSettings = mutableStateOf<String?>(null)
+    var fontVariationSettings: String?
+        get() = _fontVariationSettings.value
+        set(value) {
+            if (_fontVariationSettings.value != value) {
+                _fontVariationSettings.value = value
+            }
+        }
+
+    override val intrinsicSize: Size get() = Size.Unspecified
+
+    override fun DrawScope.onDraw() {
+        // Read snapshot state so Compose re-draws when tint/axes change
+        _tint.value
+        val settings = _fontVariationSettings.value
+
+        val path = pathCache.getOrPut(settings) {
+            if (Build.VERSION.SDK_INT >= 26) {
+                extractPaint.fontVariationSettings = settings
+            }
+            Path().also {
+                extractPaint.getTextPath(text, 0, text.length, 0f, referenceBaselineY, it)
+            }
+        }
+
+        val sizePx = size.minDimension
+        val scale = sizePx / referenceSizePx
+        val nativeCanvas = drawContext.canvas.nativeCanvas
+        nativeCanvas.save()
+        nativeCanvas.translate(size.width / 2f, 0f)
+        nativeCanvas.scale(scale, scale)
+        nativeCanvas.drawPath(path, drawPaint)
+        nativeCanvas.restore()
+    }
+}
+
+data class FontAxisAnimation(
+    val tag: String,
+    val initialValue: Float,
+    val targetValue: Float,
+)
+
+/**
+ * Reusable preset for font variation animations.
  *
- * @param text Unicode string from generated constants (e.g., MaterialSymbols.home)
- * @param font GlyphFont from [rememberGlyphFont]
- * @param size Icon size in dp
- * @param modifier Modifier to apply
- * @param tint Color to tint the icon
- * @param fontVariationSettings Pre-built variation string (from [buildFontVariationSettings])
+ * Define once and pass to [animateFontVariationAsState] so multiple call sites
+ * share the same animation configuration without repeating axis definitions.
+ */
+@Immutable
+data class GlyphVariationPreset(
+    val axes: List<FontAxisAnimation>,
+    val durationMillis: Int = 500,
+    val easing: Easing = FastOutSlowInEasing,
+    val repeatMode: RepeatMode = RepeatMode.Reverse,
+    val label: String = "FontVariation",
+)
+
+@Composable
+private fun getDisplayRefreshRate(): Float {
+    val view = LocalView.current
+    return if (Build.VERSION.SDK_INT >= 30) {
+        view.display?.refreshRate ?: 60f
+    } else {
+        @Suppress("DEPRECATION")
+        (view.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+            ?.defaultDisplay?.refreshRate ?: 60f
+    }
+}
+
+/**
+ * Animates font variation settings from a [GlyphVariationPreset].
+ *
+ * Delegates to the vararg overload, unpacking the preset's axes and parameters.
  */
 @Composable
-fun Glyph(
-    text: String,
-    font: GlyphFont,
-    size: Dp,
-    modifier: Modifier = Modifier,
-    tint: Color = Color.Black,
-    fontVariationSettings: String? = null,
-) {
-    val sizePx = with(LocalDensity.current) { size.toPx() }
-    val colorArgb = tint.toArgb()
+fun animateFontVariationAsState(preset: GlyphVariationPreset): State<String?> =
+    animateFontVariationAsState(
+        axes = preset.axes.toTypedArray(),
+        durationMillis = preset.durationMillis,
+        easing = preset.easing,
+        repeatMode = preset.repeatMode,
+        label = preset.label,
+    )
 
-    val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER } }
-    val metrics = remember { FontMetrics() }
+/**
+ * Animates font variation settings with zero per-frame allocations.
+ *
+ * Pre-computes all frame strings at the device's refresh rate, then uses
+ * [derivedStateOf] to return cached instances during animation.
+ */
+@Composable
+fun animateFontVariationAsState(
+    vararg axes: FontAxisAnimation,
+    durationMillis: Int = 500,
+    easing: Easing = FastOutSlowInEasing,
+    repeatMode: RepeatMode = RepeatMode.Reverse,
+    label: String = "FontVariation",
+): State<String?> {
+    val fps = getDisplayRefreshRate()
+    val frameCount = ceil(durationMillis * fps / 1000f).toInt()
 
-    // Configure paint during composition so Compose tracks these dependencies
-    val baselineY = remember(font, sizePx, fontVariationSettings) {
-        paint.typeface = font.typeface
-        paint.textSize = sizePx
-        if (Build.VERSION.SDK_INT >= 26) {
-            paint.fontVariationSettings = fontVariationSettings
+    val frames = remember(*axes, frameCount) {
+        Array(frameCount + 1) { i ->
+            val fraction = i.toFloat() / frameCount
+            buildFontVariationSettings(*axes.map { axis ->
+                axis.tag to lerp(axis.initialValue, axis.targetValue, fraction)
+            }.toTypedArray())
         }
-        paint.getFontMetrics(metrics)
-        (sizePx - (metrics.ascent + metrics.descent)) / 2f
     }
-    Canvas(modifier = modifier.size(size)) {
-        drawIntoCanvas { canvas ->
-            if (Build.VERSION.SDK_INT >= 26 && fontVariationSettings != null) {
-                paint.fontVariationSettings = fontVariationSettings
-            }
-            paint.color = colorArgb
-            canvas.nativeCanvas.drawText(text, sizePx / 2f, baselineY, paint)
+
+    val transition = rememberInfiniteTransition(label)
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(durationMillis, easing = easing),
+            repeatMode,
+        ),
+        label = "${label}_progress",
+    )
+
+    return remember(frames) {
+        derivedStateOf {
+            frames[(progress * frameCount).roundToInt().coerceIn(0, frameCount)]
         }
     }
 }
 
 /**
- * Renders a font glyph as an icon using Android's Paint + Canvas.
- *
- * Convenience overload that accepts axis values as a Map. For optimal animation
- * performance, prefer the overload that takes a [fontVariationSettings] string
- * with [buildFontVariationSettings].
+ * Remembers a [GlyphPainter] for rendering a font glyph with [Icon][androidx.compose.material3.Icon].
  *
  * @param text Unicode string from generated constants (e.g., MaterialSymbols.home)
  * @param font GlyphFont from [rememberGlyphFont]
- * @param size Icon size in dp
- * @param modifier Modifier to apply
  * @param tint Color to tint the icon
- * @param axes Variable font axis values (e.g., mapOf("FILL" to 1f, "wght" to 400f))
+ * @param fontVariationSettings Pre-built variation string (from [buildFontVariationSettings])
  */
 @Composable
-fun Glyph(
+fun rememberGlyphPainter(
     text: String,
     font: GlyphFont,
-    size: Dp,
-    modifier: Modifier = Modifier,
     tint: Color = Color.Black,
-    axes: Map<String, Float> = emptyMap(),
-) {
-    val variationSettings = remember(axes) {
-        if (axes.isNotEmpty()) {
-            axes.entries.joinToString(", ") { (tag, value) -> "'$tag' $value" }
-        } else {
-            null
-        }
+    fontVariationSettings: String? = null,
+): Painter {
+    return remember(text, font) {
+        GlyphPainter(text, font.typeface)
+    }.also {
+        it.tint = tint
+        it.fontVariationSettings = fontVariationSettings
     }
-    Glyph(
-        text = text,
-        font = font,
-        size = size,
-        modifier = modifier,
-        tint = tint,
-        fontVariationSettings = variationSettings,
-    )
 }

@@ -1,25 +1,9 @@
 package com.davidmedenjak.fontsubsetting
 
-/**
- * Font Subsetting Demo - Variable Font Animation
- *
- * Demonstrates two rendering approaches side-by-side:
- * - **Native Font**: Android's Text composable with variable font axes
- * - **Glyph Library**: Paint + Canvas rendering with variable font axes
- *
- * Both tabs animate FILL (0-1) and GRAD (0-200) across 40 icons at 60fps.
- */
-
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -35,23 +19,26 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.davidmedenjak.fontsubsetting.ui.theme.FontSubsettingTheme
+
+private val SelectableIcon = GlyphVariationPreset(
+    axes = listOf(
+        FontAxisAnimation("FILL", 0f, 1f),
+        FontAxisAnimation("wght", 400f, 400f),
+        FontAxisAnimation("GRAD", 0f, 200f),
+    ),
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,25 +56,21 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun MainScreen(modifier: Modifier = Modifier) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val font = rememberGlyphFont(R.font.symbols)
+    val fontVariationSettings by animateFontVariationAsState(SelectableIcon)
 
-    Column(modifier = modifier.fillMaxSize()) {
-        TabRow(selectedTabIndex = selectedTab) {
-            Tab(
-                selected = selectedTab == 0,
-                onClick = { selectedTab = 0 },
-                text = { Text("Native Font") }
+    IconGridDemo(modifier = modifier) { icon, name ->
+        IconCard(name = name) {
+            Icon(
+                painter = rememberGlyphPainter(
+                    text = icon,
+                    font = font,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    fontVariationSettings = fontVariationSettings,
+                ),
+                contentDescription = name,
+                modifier = Modifier,
             )
-            Tab(
-                selected = selectedTab == 1,
-                onClick = { selectedTab = 1 },
-                text = { Text("Glyph Library") }
-            )
-        }
-
-        when (selectedTab) {
-            0 -> NativeFontDemo()
-            1 -> GlyphLibraryDemo()
         }
     }
 }
@@ -144,86 +127,13 @@ private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.cleanHands to "clean_hands",
 )
 
-/**
- * Animates fill (0-1) and grade (0-200) axes with an infinite reverse transition.
- * Returns a Pair of (fill, grade) animated values.
- */
-@Composable
-private fun rememberAnimatedFillAndGrade(label: String): Pair<Float, Float> {
-    val infiniteTransition = rememberInfiniteTransition(label = label)
-    val fill by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "fill"
-    )
-    val grade by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 200f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 500, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "grade"
-    )
-    return fill to grade
-}
-
-@Composable
-fun NativeFontDemo() {
-    val (fill, grade) = rememberAnimatedFillAndGrade("native_font_animation")
-
-    val animatedFontFamily = rememberVariableFontFamily(
-        VariableFontConfig(
-            fill = fill,
-            weight = 400f,
-            grade = grade,
-            opticalSize = 48f
-        )
-    )
-
-    IconGridDemo(
-        title = "Native Android Font Rendering",
-        description = "Using Android's Text composable with variable font axes"
-    ) { icon, name ->
-        NativeIconCard(
-            icon = icon,
-            name = name,
-            fontFamily = animatedFontFamily
-        )
-    }
-}
-
-@Composable
-fun GlyphLibraryDemo() {
-    val font = rememberGlyphFont(R.font.symbols)
-    val (fill, grade) = rememberAnimatedFillAndGrade("glyph_animation")
-
-    IconGridDemo(
-        title = "Glyph Library Canvas Rendering",
-        description = "Using Paint + Canvas with variable font axes"
-    ) { icon, name ->
-        GlyphIconCard(
-            icon = icon,
-            name = name,
-            font = font,
-            fill = fill,
-            grade = grade
-        )
-    }
-}
-
 @Composable
 fun IconGridDemo(
-    title: String,
-    description: String,
+    modifier: Modifier = Modifier,
     iconCard: @Composable (icon: String, name: String) -> Unit
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
@@ -237,19 +147,19 @@ fun IconGridDemo(
                 modifier = Modifier.padding(16.dp)
             ) {
                 Text(
-                    text = title,
+                    text = "GlyphPainter Demo",
                     style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = description,
+                    text = "Paint + Canvas rendering via Icon(painter = rememberGlyphPainter(...))",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "Animating: FILL (0→1) and GRAD (0→200)",
+                    text = "Animating: FILL (0\u21921) and GRAD (0\u2192200)",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
                 )
@@ -269,44 +179,6 @@ fun IconGridDemo(
                 iconCard(icon, name)
             }
         }
-    }
-}
-
-@Composable
-fun NativeIconCard(
-    icon: String,
-    name: String,
-    fontFamily: androidx.compose.ui.text.font.FontFamily
-) {
-    IconCard(name = name) {
-        Text(
-            text = icon,
-            fontFamily = fontFamily,
-            fontSize = 20.sp,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-fun GlyphIconCard(
-    icon: String,
-    name: String,
-    font: GlyphFont,
-    fill: Float,
-    grade: Float
-) {
-    IconCard(name = name) {
-        Glyph(
-            text = icon,
-            font = font,
-            size = 20.dp,
-            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontVariationSettings = remember(fill, grade) {
-                buildFontVariationSettings("FILL" to fill, "wght" to 400f, "GRAD" to grade)
-            },
-        )
     }
 }
 
