@@ -7,11 +7,13 @@ on:
       - 'v*'
     paths:
       - 'plugin/**'
+      - 'runtime/**'
       - '.github/workflows/build-and-publish.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'plugin/**'
+      - 'runtime/**'
   workflow_dispatch:
     inputs:
       version:
@@ -241,7 +243,7 @@ jobs:
             exit 1
           fi
 
-      - name: Publish to GitHub Packages
+      - name: Publish plugin to GitHub Packages
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -252,6 +254,18 @@ jobs:
             -PgithubPackagesUsername=${{ github.actor }} \
             -PgithubPackagesPassword=${{ secrets.GITHUB_TOKEN }} \
             --build-cache --parallel --info
+
+      - name: Publish runtime to GitHub Packages
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew :runtime:publishReleasePublicationToGitHubPackagesRepository \
+            -Pversion=${{ steps.version.outputs.version }} \
+            -PgithubPackagesUrl=https://maven.pkg.github.com/${{ github.repository }} \
+            -PgithubPackagesUsername=${{ github.actor }} \
+            -PgithubPackagesPassword=${{ secrets.GITHUB_TOKEN }} \
+            --build-cache --info
 
       - name: Publish to Gradle Plugin Portal
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.version != '')

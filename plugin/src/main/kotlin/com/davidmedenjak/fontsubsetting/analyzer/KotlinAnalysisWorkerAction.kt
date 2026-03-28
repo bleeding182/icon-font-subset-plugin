@@ -10,28 +10,11 @@ import java.util.logging.Level
 import java.util.logging.LogRecord
 import java.util.logging.Logger
 
-/**
- * Worker action that performs Kotlin icon usage analysis in an isolated classloader.
- *
- * This action runs in a separate classloader with kotlin-compiler-embeddable on its classpath,
- * preventing conflicts with the Kotlin Gradle Plugin (KGP) as recommended by Kotlin 2.1+.
- */
-abstract class KotlinAnalysisWorkerAction : WorkAction<KotlinAnalysisWorkerAction.Parameters> {
+internal abstract class KotlinAnalysisWorkerAction : WorkAction<KotlinAnalysisWorkerAction.Parameters> {
 
     interface Parameters : WorkParameters {
-        /**
-         * Source files to analyze (Kotlin files).
-         */
         val sourceFiles: ConfigurableFileCollection
-
-        /**
-         * Fully qualified names of target icon constant classes to look for.
-         */
         val targetClasses: ListProperty<String>
-
-        /**
-         * Output file to write analysis results to.
-         */
         val outputFile: RegularFileProperty
     }
 
@@ -40,7 +23,6 @@ abstract class KotlinAnalysisWorkerAction : WorkAction<KotlinAnalysisWorkerActio
         val sourceFilesList = parameters.sourceFiles.files.toList()
         val outputFile = parameters.outputFile.get().asFile
 
-        // Create logger that outputs to stdout/stderr for Gradle logging
         val logger = Logger.getLogger(this::class.java.name).apply {
             addHandler(object : Handler() {
                 override fun publish(record: LogRecord) {

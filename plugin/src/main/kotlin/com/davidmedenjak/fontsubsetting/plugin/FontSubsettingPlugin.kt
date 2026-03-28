@@ -30,8 +30,6 @@ class FontSubsettingPlugin : Plugin<Project> {
             project.layout.buildDirectory.dir("generated/res/fontSubsetting")
         )
 
-        // Configure isolated Kotlin compiler classpath for Workers API
-        // This prevents classloader conflicts with KGP (Kotlin 2.1+ requirement)
         val kotlinCompilerClasspath = createKotlinCompilerConfiguration(project)
 
         project.plugins.withType(AppPlugin::class.java) {
@@ -44,9 +42,10 @@ class FontSubsettingPlugin : Plugin<Project> {
     }
 
     private fun createKotlinCompilerConfiguration(project: Project): org.gradle.api.file.FileCollection {
-        val kotlinVersion = project.plugins.withType(org.jetbrains.kotlin.gradle.plugin.KotlinBasePlugin::class.java).firstOrNull()?.pluginVersion ?: KOTLIN_VERSION_FALLBACK
+        val kotlinVersion = project.plugins
+            .withType(org.jetbrains.kotlin.gradle.plugin.KotlinBasePlugin::class.java)
+            .firstOrNull()?.pluginVersion ?: KOTLIN_VERSION_FALLBACK
 
-        // Create a detached configuration to avoid affecting other parts of the build
         val compilerDependencyScope = project.configurations.create("fontSubsettingKotlinCompiler") {
             it.isVisible = false
             it.isCanBeConsumed = false
@@ -55,7 +54,6 @@ class FontSubsettingPlugin : Plugin<Project> {
 
         project.dependencies.add(compilerDependencyScope.name, "$KOTLIN_COMPILER_EMBEDDABLE:$kotlinVersion")
 
-        // Create resolvable configuration
         val resolvableConfiguration = project.configurations.create("fontSubsettingKotlinCompilerResolvable") {
             it.isVisible = false
             it.isCanBeConsumed = false
@@ -157,7 +155,6 @@ class FontSubsettingPlugin : Plugin<Project> {
                 generateTask.flatMap { it.fullyQualifiedClassName }.map { listOf(it) }
             )
 
-            // Configure isolated Kotlin compiler classpath
             task.kotlinCompilerClasspath.from(kotlinCompilerClasspath)
 
             configureSourceSets(variant, project, task)

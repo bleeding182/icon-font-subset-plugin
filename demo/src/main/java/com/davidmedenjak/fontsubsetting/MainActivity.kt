@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(modifier: Modifier = Modifier) {
+private fun MainScreen(modifier: Modifier = Modifier) {
     val font = rememberGlyphFont(R.font.symbols)
     val variation by animateFontVariationAsState(SelectableIcon)
 
@@ -124,7 +124,6 @@ fun MainScreen(modifier: Modifier = Modifier) {
     }
 }
 
-// Icon list for the demo - 40 icons (8x5 grid)
 private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.home to "home",
     MaterialSymbols.favorite to "favorite",

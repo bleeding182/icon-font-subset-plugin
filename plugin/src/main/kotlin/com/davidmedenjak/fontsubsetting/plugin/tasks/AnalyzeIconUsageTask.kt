@@ -17,13 +17,6 @@ import org.gradle.api.tasks.TaskAction
 import org.gradle.workers.WorkerExecutor
 import javax.inject.Inject
 
-/**
- * Task that analyzes Kotlin source files to find icon constant usage.
- *
- * This task uses the Gradle Workers API with classloader isolation to run the analysis,
- * preventing classloader conflicts with the Kotlin Gradle Plugin (KGP) as recommended
- * by Kotlin 2.1+.
- */
 @CacheableTask
 abstract class AnalyzeIconUsageTask : DefaultTask() {
 
@@ -41,10 +34,6 @@ abstract class AnalyzeIconUsageTask : DefaultTask() {
     @get:OutputFile
     abstract val outputFile: RegularFileProperty
 
-    /**
-     * Classpath containing kotlin-compiler-embeddable for isolated execution.
-     * This is configured by the plugin to prevent conflicts with KGP.
-     */
     @get:Classpath
     abstract val kotlinCompilerClasspath: ConfigurableFileCollection
 
@@ -53,7 +42,6 @@ abstract class AnalyzeIconUsageTask : DefaultTask() {
         val targetClassList = targetClasses.get()
         logger.info("Analyzing icon usage for ${targetClassList.size} target class(es)")
 
-        // Submit work to worker with isolated classloader
         val workQueue = workerExecutor.classLoaderIsolation { spec ->
             spec.classpath.from(kotlinCompilerClasspath)
         }
@@ -64,6 +52,6 @@ abstract class AnalyzeIconUsageTask : DefaultTask() {
             parameters.outputFile.set(outputFile)
         }
 
-        logger.info("Icon usage analysis completed")
+        logger.info("Icon usage analysis submitted")
     }
 }

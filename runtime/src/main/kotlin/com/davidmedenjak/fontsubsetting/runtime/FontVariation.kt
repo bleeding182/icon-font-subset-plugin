@@ -3,19 +3,15 @@ package com.davidmedenjak.fontsubsetting.runtime
 import androidx.compose.runtime.Immutable
 
 /**
- * Structured font variation axes — carries axis tags and values directly to HarfBuzz
- * without string serialization.
+ * Font variation axes for variable font rendering.
  *
  * Use [FontVariation.of] to create instances, or [FontVariation.Empty] for no variation.
  */
 @Immutable
 class FontVariation internal constructor(
-    val axes: Array<String>,
-    val values: FloatArray,
-    /**
-     * Links animation-produced instances to the full frame set for batch pre-extraction.
-     * Null for manually-constructed or static variations.
-     */
+    internal val axes: Array<String>,
+    internal val values: FloatArray,
+    // All animation frames for batch pre-extraction, or null for static variations.
     internal val allFrames: Array<FontVariation>? = null,
 ) {
 

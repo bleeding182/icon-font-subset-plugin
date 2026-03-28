@@ -2,31 +2,21 @@ package com.davidmedenjak.fontsubsetting.native
 
 import java.io.File
 
-/**
- * Logger interface for native code callbacks
- */
-interface NativeLogger {
+internal interface NativeLogger {
     fun log(level: Int, message: String)
 }
 
-/**
- * JNI wrapper for HarfBuzz font subsetting operations.
- * Provides high-level Kotlin API for font subsetting with comprehensive logging.
- */
-class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
-    
+internal class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
+
     init {
-        // Ensure library is loaded when instance is created
         ensureLibraryLoaded()
-        // Set up native logging if logger provided
         logger?.let { nativeSetLogger(it) }
     }
     
     companion object {
         private var nativeLibraryLoaded = false
         private val LIBRARY_LOADED_LOCK = Object()
-        
-        // Log levels matching C++ enum
+
         const val LOG_DEBUG = 0
         const val LOG_INFO = 1
         const val LOG_WARN = 2
@@ -44,10 +34,8 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         
         private fun loadNativeLibrary() {
             try {
-                // Try to load from system path first
                 System.loadLibrary("fontsubsetting")
             } catch (e: UnsatisfiedLinkError) {
-                // Try to load from resources
                 loadFromResources()
             }
         }
@@ -55,15 +43,10 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         private fun loadFromResources() {
             val (osName, archName, libName) = getPlatformInfo()
 
-            // Build list of paths to try, from most specific to least specific
             val resourcePaths = buildList {
-                // Platform-specific paths with normalized architecture
                 add("/native/$osName-$archName/$libName")
-                
-                // Check native-cross directory (from Docker cross-compilation)
                 add("/native-cross/$osName-$archName/$libName")
-                
-                // Alternative architecture names
+
                 when (archName) {
                     "x86_64" -> {
                         add("/native/$osName-amd64/$libName")
@@ -83,20 +66,15 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
                     }
                 }
                 
-                // Generic fallback
                 add("/native/$libName")
                 add("/native-cross/$libName")
             }
             
             var inputStream: java.io.InputStream? = null
-            var successPath: String? = null
-            
+
             for (path in resourcePaths) {
                 inputStream = HarfBuzzSubsetter::class.java.getResourceAsStream(path)
-                if (inputStream != null) {
-                    successPath = path
-                    break
-                }
+                if (inputStream != null) break
             }
             
             if (inputStream == null) {
@@ -123,7 +101,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
                     |  - Windows x86_64  
                     |  - macOS x86_64
                     |  - macOS ARM64
-                    |
                     |
                     |================================================================================
                     """.trimMargin()
@@ -180,22 +157,8 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         }
     }
     
-    /**
-     * Sets the logger for native code callbacks
-     */
     private external fun nativeSetLogger(logger: NativeLogger)
 
-    /**
-     * Subsets a font file with axis configurations and subsetting flags.
-     *
-     * @param inputFontPath Path to the input font file
-     * @param outputFontPath Path where the subsetted font will be saved
-     * @param codepoints Unicode codepoints to include
-     * @param axisConfigs List of axis configurations
-     * @param stripHinting Whether to strip hinting instructions (default: true)
-     * @param stripGlyphNames Whether to strip glyph names (default: true)
-     * @return true if subsetting was successful, false otherwise
-     */
     fun subsetFontWithAxesAndFlags(
         inputFontPath: String,
         outputFontPath: String,
@@ -254,12 +217,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         stripGlyphNames: Boolean
     ): Boolean
     
-    /**
-     * Validates that a font file can be processed.
-     * 
-     * @param fontPath Path to the font file
-     * @return true if the font is valid and can be processed
-     */
     fun validateFont(fontPath: String): Boolean {
         ensureLibraryLoaded()
         return nativeValidateFont(fontPath)
@@ -267,12 +224,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
     
     private external fun nativeValidateFont(fontPath: String): Boolean
     
-    /**
-     * Gets information about a font file.
-     * 
-     * @param fontPath Path to the font file
-     * @return Font information as a string (JSON format)
-     */
     fun getFontInfo(fontPath: String): String? {
         ensureLibraryLoaded()
         return nativeGetFontInfo(fontPath)
@@ -280,12 +231,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
     
     private external fun nativeGetFontInfo(fontPath: String): String?
     
-    /**
-     * Gets detailed font information including axis details.
-     * 
-     * @param fontPath Path to the font file
-     * @return FontInfo object with font details, or null if error
-     */
     fun getFontInfoDetailed(fontPath: String): FontInfo? {
         ensureLibraryLoaded()
         val infoString = nativeGetFontInfo(fontPath) ?: return null
@@ -297,16 +242,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         }
     }
     
-    /**
-     * Parses font info from a properties-like format using Properties class.
-     * Expected format:
-     * glyphCount=<number>
-     * unitsPerEm=<number>
-     * fileSize=<number>
-     * axis.0=<tag>,<min>,<default>,<max>
-     * axis.1=<tag>,<min>,<default>,<max>
-     * ...
-     */
     private fun parseFontInfo(infoString: String): FontInfo {
         val props = java.util.Properties()
         props.load(infoString.reader())
@@ -315,7 +250,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         val unitsPerEm = props.getProperty("unitsPerEm")?.toInt() ?: 0
         val fileSize = props.getProperty("fileSize")?.toLong() ?: 0L
         
-        // Collect all axis properties
         val axes = mutableListOf<FontInfo.AxisInfo>()
         var index = 0
         while (true) {
@@ -340,9 +274,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         )
     }
     
-    /**
-     * Data class for font information.
-     */
     data class FontInfo(
         val glyphCount: Int,
         val unitsPerEm: Int,
@@ -357,9 +288,6 @@ class HarfBuzzSubsetter(private val logger: NativeLogger? = null) {
         )
     }
     
-    /**
-     * Data class for axis configuration.
-     */
     data class AxisConfig(
         val tag: String,
         val minValue: Float = 0f,

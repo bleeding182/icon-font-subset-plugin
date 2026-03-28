@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    // Use "local" for development (uses included build), or a version number for published releases
     id("com.davidmedenjak.fontsubsetting") version "local"
 }
 
@@ -43,22 +42,12 @@ fontSubsetting {
             fontFile.set(file("symbolfonts/MaterialSymbolsOutlined.ttf"))
             codepointsFile.set(file("symbolfonts/MaterialSymbolsOutlined.codepoints"))
             className.set("com.davidmedenjak.fontsubsetting.MaterialSymbols")
-            // resourceName and fontFileName will default based on font file name
-            // but we can override them if needed:
             resourceName.set("symbols")
 
-            // Configure variable font axes
             axes {
-                // Keep fill axis but limit to 0..1 range
                 axis("FILL").range(0f, 1f, 0f)
-                
-                // Limit weight to 400-700 range (normal to bold)
                 axis("wght").range(400f, 700f, 400f)
-
-                // Keep grade axis for morphing animations
                 axis("GRAD").range(-25f, 200f, 0f)
-                
-                // Keep optical size but limit to 24-48 range
                 axis("opsz").range(24f, 48f, 48f)
             }
             stripGlyphNames = true

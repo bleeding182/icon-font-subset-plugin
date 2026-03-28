@@ -35,7 +35,6 @@
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-//        mavenLocal() // For local SNAPSHOT builds
         google()
         mavenCentral()
     }

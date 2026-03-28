@@ -5,7 +5,7 @@ import com.davidmedenjak.fontsubsetting.native.NativeLogger
 import org.gradle.api.GradleException
 import org.gradle.api.logging.Logger
 
-class NativeSubsetterFactory(private val logger: Logger) {
+internal class NativeSubsetterFactory(private val logger: Logger) {
 
     private var subsetter: HarfBuzzSubsetter? = null
 

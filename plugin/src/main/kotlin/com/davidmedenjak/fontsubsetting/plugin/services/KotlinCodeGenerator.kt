@@ -2,15 +2,8 @@ package com.davidmedenjak.fontsubsetting.plugin.services
 
 import com.davidmedenjak.fontsubsetting.plugin.providers.IconMapping
 
-/**
- * Generates Kotlin code for icon constants.
- * Always generates an internal object with alphabetically sorted constants.
- */
-object KotlinCodeGenerator {
+internal object KotlinCodeGenerator {
 
-    /**
-     * Generates Kotlin code for the given icon mappings.
-     */
     fun generate(
         packageName: String,
         className: String,
@@ -31,7 +24,6 @@ object KotlinCodeGenerator {
                 val propertyName = KotlinNamingService.toPropertyName(icon.name)
                 val unicodeValue = icon.toUnicodeEscape()
 
-                // Add comment with original name if it differs
                 if (propertyName != icon.name) {
                     appendLine("    /** Original name: ${icon.name} */")
                 }

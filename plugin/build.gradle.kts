@@ -10,15 +10,10 @@ version = providers.gradleProperty("version").getOrElse("1.0.0-SNAPSHOT")
 
 dependencies {
     implementation(libs.kotlin.stdlib)
-    // Native module is now integrated directly into the plugin
     implementation(libs.android.gradle.plugin)
-    compileOnly(libs.kotlin.gradle.plugin)  // Changed to compileOnly to avoid classloader conflicts
-
-    // For PSI-based source code analysis
-    // Using compileOnly to avoid classloader conflicts with KGP (Kotlin 2.1+ requirement)
-    // Runtime classpath configured via Workers API with isolated classloader
+    compileOnly(libs.kotlin.gradle.plugin)
     compileOnly(libs.kotlin.compiler.embeddable)
-    
+
     testImplementation(libs.junit)
     testImplementation(libs.assertj)
     testImplementation(libs.mockito.core)
@@ -36,7 +31,6 @@ kotlin {
     }
 }
 
-// Copy native libraries from staging directory (used in CI) into build directory
 val copyNativeLibraries by tasks.registering(Copy::class) {
     from(layout.projectDirectory.dir("native-libs-staging")) {
         include("**/*.so", "**/*.dll", "**/*.dylib")
@@ -45,11 +39,9 @@ val copyNativeLibraries by tasks.registering(Copy::class) {
 }
 
 tasks.named<ProcessResources>("processResources") {
-    // Implicit dependency via input/output relationship
     from(copyNativeLibraries)
 }
 
-// Configure the gradle plugin
 gradlePlugin {
     website.set("https://github.com/bleeding182/icon-font-subset-plugin")
     vcsUrl.set("https://github.com/bleeding182/icon-font-subset-plugin.git")
@@ -78,15 +70,6 @@ tasks.test {
     }
 }
 
-// Configure plugin publishing credentials
-// The Gradle Plugin Publish 2.0+ plugin handles credentials automatically
-// from gradle.properties or command-line properties
-
-// Plugin validation task - removed due to CI circular dependency issues
-// The Gradle Plugin Portal will validate during publishing
-
-// The java-gradle-plugin automatically creates publications with proper plugin markers
-// We need to configure the POM details
 publishing {
     publications.withType<MavenPublication>().configureEach {
         pom {

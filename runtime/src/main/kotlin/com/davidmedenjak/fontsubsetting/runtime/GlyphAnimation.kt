@@ -27,9 +27,6 @@ data class FontAxisAnimation(
     val targetValue: Float,
 )
 
-/**
- * Reusable preset for font variation animations.
- */
 @Immutable
 data class GlyphVariationPreset(
     val axes: List<FontAxisAnimation>,
@@ -39,9 +36,6 @@ data class GlyphVariationPreset(
     val label: String = "FontVariation",
 )
 
-/**
- * Animates font variation settings from a [GlyphVariationPreset].
- */
 @Composable
 fun animateFontVariationAsState(preset: GlyphVariationPreset): State<FontVariation> =
     animateFontVariationAsState(
@@ -53,12 +47,11 @@ fun animateFontVariationAsState(preset: GlyphVariationPreset): State<FontVariati
     )
 
 /**
- * Animates font variation settings with zero per-frame allocations.
+ * Animates font variation axes as a [State] of [FontVariation].
  *
- * Pre-computes all [FontVariation] frames at the device's refresh rate, then uses
- * [derivedStateOf] to return cached instances during animation. Each returned
- * [FontVariation] carries a reference to all frames internally, enabling
- * [rememberGlyphPainter] to batch pre-extract animation paths in the background.
+ * Pre-computes all frames at the device's refresh rate to avoid per-frame allocations.
+ * Each returned [FontVariation] carries a reference to all frames, enabling
+ * [rememberGlyphPainter] to batch pre-extract glyph paths in the background.
  */
 @Composable
 fun animateFontVariationAsState(

@@ -6,23 +6,12 @@ import org.jetbrains.kotlin.psi.KtImportDirective
 import org.jetbrains.kotlin.psi.KtReferenceExpression
 import org.jetbrains.kotlin.psi.KtVisitorVoid
 
-/**
- * PSI visitor that finds references to icon constants in Kotlin code.
- *
- * This visitor traverses Kotlin AST to find:
- * - Direct references like Icons.HOME
- * - Statically imported constants
- * - Qualified references with full package names
- */
-class IconReferenceVisitor(
+internal class IconReferenceVisitor(
     private val targetClasses: List<String>
 ) : KtVisitorVoid() {
 
     private val _usedIcons = mutableSetOf<String>()
 
-    /**
-     * Returns the set of icon names found during traversal.
-     */
     val usedIcons: Set<String>
         get() = _usedIcons.toSet()
 
@@ -85,9 +74,6 @@ class IconReferenceVisitor(
         return text.matches(CONSTANT_NAME_REGEX)
     }
 
-    /**
-     * Resets the visitor state for reuse.
-     */
     fun reset() {
         _usedIcons.clear()
     }

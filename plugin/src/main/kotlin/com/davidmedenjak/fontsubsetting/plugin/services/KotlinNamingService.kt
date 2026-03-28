@@ -1,9 +1,6 @@
 package com.davidmedenjak.fontsubsetting.plugin.services
 
-/**
- * Converts icon names to valid Kotlin property names.
- */
-object KotlinNamingService {
+internal object KotlinNamingService {
 
     private val KOTLIN_KEYWORDS = setOf(
         "as", "break", "class", "continue", "do", "else", "false", "for", "fun",
@@ -30,10 +27,6 @@ object KotlinNamingService {
         "8mp" to "eightMp", "9k" to "nineK", "9mp" to "nineMp"
     )
 
-    /**
-     * Converts an icon name to a valid Kotlin property name.
-     * Always succeeds - falls back to underscore prefix if needed.
-     */
     fun toPropertyName(name: String): String {
         if (name.isEmpty()) return "_empty"
 

@@ -11,23 +11,8 @@ import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import java.io.File
 
-/**
- * Factory for creating Kotlin PSI environments for code analysis.
- *
- * This factory encapsulates the complex setup required for Kotlin PSI analysis,
- * providing a clean interface for creating configured environments.
- */
-class PsiEnvironmentFactory {
+internal class PsiEnvironmentFactory {
 
-    /**
-     * Creates a Kotlin PSI environment for analyzing the specified source files.
-     *
-     * @param disposable Disposable for resource management
-     * @param sourceFiles Files to be analyzed
-     * @param additionalSourceDirs Additional directories to include in the source path (e.g., generated sources)
-     * @param moduleName Name of the module being analyzed
-     * @return Configured KotlinCoreEnvironment
-     */
     fun createEnvironment(
         disposable: Disposable,
         sourceFiles: Collection<File>,
@@ -49,16 +34,13 @@ class PsiEnvironmentFactory {
         moduleName: String
     ): CompilerConfiguration {
         return CompilerConfiguration().apply {
-            // Configure message collector for error reporting
             put(
                 CLIConfigurationKeys.MESSAGE_COLLECTOR_KEY,
                 PrintingMessageCollector(System.err, MessageRenderer.PLAIN_RELATIVE_PATHS, false)
             )
 
-            // Set module name
             put(CommonConfigurationKeys.MODULE_NAME, moduleName)
 
-            // Configure source roots for proper import resolution
             val sourcePaths = collectSourcePaths(sourceFiles, additionalSourceDirs)
             put(CLIConfigurationKeys.CONTENT_ROOTS, sourcePaths)
         }

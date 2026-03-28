@@ -8,12 +8,10 @@ import kotlin.concurrent.withLock
  * Native HarfBuzz-based glyph outline extractor.
  *
  * Loads a font from raw bytes and extracts glyph outlines as [Path] objects,
- * bypassing Android's Paint/Typeface/Skia font stack entirely.
+ * bypassing Android's Paint/Typeface stack. Variable font axes work on all API levels.
  *
- * Variable font axes are supported on all API levels (no API 26+ requirement).
- *
- * Thread-safe: all extraction methods are synchronized via a lock, allowing
- * background batch extraction alongside main-thread rendering.
+ * Thread-safe: extraction methods are synchronized, allowing background batch
+ * extraction alongside main-thread rendering.
  */
 class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoCloseable {
 
@@ -25,12 +23,8 @@ class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoClo
     }
 
     /**
-     * Extract a glyph outline for the given codepoint with the specified variation axes.
-     *
-     * @param codepoint Unicode codepoint
-     * @param axisTags Axis tag strings (e.g., "FILL", "wght")
-     * @param axisValues Corresponding axis values
-     * @return Path in em-normalized coordinates (1.0 = 1 em), or null if codepoint not found
+     * Extracts a glyph outline as a [Path] in em-normalized coordinates (1.0 = 1 em).
+     * Returns null if the codepoint is not found in the font.
      */
     fun extractPath(codepoint: Int, axisTags: Array<String>, axisValues: FloatArray): Path? =
         lock.withLock {
@@ -39,13 +33,8 @@ class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoClo
         }
 
     /**
-     * Batch extract: same glyph with multiple variation settings in one JNI call.
-     *
-     * @param codepoint Unicode codepoint
-     * @param axisTags Axis tag strings (same for all sets)
-     * @param axisValues Flattened values: axisTags.size * numSets entries
-     * @param numSets Number of variation sets
-     * @return List of Paths in em-normalized coordinates, or null if codepoint not found
+     * Batch extraction: same glyph with multiple variation settings in one JNI round-trip.
+     * [axisValues] is a flattened array of `axisTags.size * numSets` entries.
      */
     fun extractPathBatch(
         codepoint: Int,
@@ -72,7 +61,6 @@ class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoClo
             System.loadLibrary("glyphruntime")
         }
 
-        /** Creates an extractor from raw font file bytes. */
         fun create(fontData: ByteArray): HarfBuzzGlyphExtractor = HarfBuzzGlyphExtractor(fontData)
     }
 

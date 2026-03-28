@@ -12,12 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Remembers a [GlyphFont] loaded from a font resource using native HarfBuzz.
- *
- * The font bytes are read from the resource and passed to HarfBuzz for
- * direct glyph outline extraction, bypassing Android's Paint/Typeface stack.
- *
- * @param resourceId Font resource ID (e.g., R.font.symbols)
+ * Remembers a [GlyphFont] loaded from a font resource.
  */
 @Composable
 fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
@@ -34,18 +29,10 @@ fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
 }
 
 /**
- * Remembers a [GlyphPainter] for rendering a font glyph via native HarfBuzz path extraction.
+ * Remembers a [Painter] for rendering a font glyph.
  *
- * Only the first Unicode codepoint of [text] is used — this matches the plugin-generated
+ * Only the first Unicode codepoint of [text] is used, matching the plugin-generated
  * icon constants which are single-codepoint strings.
- *
- * When [variation] comes from [animateFontVariationAsState], animation frame paths are
- * automatically batch pre-extracted in the background for optimal performance.
- *
- * @param text Unicode string from generated constants (e.g., MaterialSymbols.home)
- * @param font GlyphFont from [rememberGlyphFont]
- * @param tint Color to tint the icon
- * @param variation Font variation axes (from [FontVariation.of] or [animateFontVariationAsState])
  */
 @Composable
 fun rememberGlyphPainter(
@@ -62,7 +49,6 @@ fun rememberGlyphPainter(
         it.variation = variation
     }
 
-    // Background batch extraction when variation carries animation frames
     val allFrames = variation.allFrames
     LaunchedEffect(painter, allFrames) {
         if (allFrames == null || allFrames.size <= 1) return@LaunchedEffect
@@ -70,19 +56,17 @@ fun rememberGlyphPainter(
         val axisTags = allFrames[0].axes
         if (axisTags.isEmpty()) return@LaunchedEffect
 
-        // Build flattened values for remaining frames (skip first — already extracted lazily)
+        // Skip first frame — it will be extracted lazily on first render
         val remainingFrames = allFrames.copyOfRange(1, allFrames.size)
         val flatValues = FloatArray(axisTags.size * remainingFrames.size)
         remainingFrames.forEachIndexed { i, frame ->
             frame.values.copyInto(flatValues, i * axisTags.size)
         }
 
-        // Batch extract on background thread
         val paths = withContext(Dispatchers.Default) {
             extractor.extractPathBatch(codepoint, axisTags, flatValues, remainingFrames.size)
         } ?: return@LaunchedEffect
 
-        // Populate cache on main thread
         paths.forEachIndexed { i, path ->
             painter.putPath(remainingFrames[i], path)
         }

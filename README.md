@@ -1,16 +1,17 @@
 # Font Subsetting for Android
 
-A Gradle plugin that automatically reduces Android app font sizes by subsetting them at build time to include only the glyphs actually used in the code.
-
-**Result**: Material Symbols font reduced from **10MB → 1.8KB** (just the icons you use)
+A Gradle plugin that automatically subsets icon fonts based on actual usage in your code, paired with a Compose runtime library for rendering. Material Symbols ships ~10MB of glyphs; most apps use a handful. This plugin analyzes your source, finds which icons you reference, and produces a subset font containing only those glyphs -- reducing the font from megabytes to kilobytes.
 
 ## How It Works
 
-The plugin analyzes your Kotlin code at build time to detect which icons are used, then automatically subsets the font file to include only those glyphs. This happens through three Gradle tasks that generate icon constants, analyze usage via PSI parsing, and perform HarfBuzz-based font subsetting.
+1. **Generate constants** -- The plugin parses `.codepoints` files and generates type-safe Kotlin constants for each icon.
+2. **Analyze usage** -- Kotlin PSI analysis scans your source code to determine which icon constants are actually referenced.
+3. **Subset font** -- HarfBuzz creates a new font file containing only the used glyphs, with optional axis and hinting optimizations.
+4. **Render** -- The runtime library provides a Compose `Glyph` painter that renders icons via native HarfBuzz path extraction.
 
-## Installation
+## Setup
 
-### From Gradle Plugin Portal
+### Plugin
 
 ```kotlin
 // settings.gradle.kts
@@ -21,9 +22,7 @@ pluginManagement {
         mavenCentral()
     }
 }
-```
 
-```kotlin
 // app/build.gradle.kts
 plugins {
     id("com.android.application")
@@ -32,32 +31,9 @@ plugins {
 }
 ```
 
-### From GitHub Packages
+### Configuration
 
 ```kotlin
-// settings.gradle.kts
-pluginManagement {
-    repositories {
-        maven {
-            url = uri("https://maven.pkg.github.com/bleeding182/icon-font-subset-plugin")
-            credentials {
-                username = providers.gradleProperty("gpr.user").orNull ?: System.getenv("GITHUB_ACTOR")
-                password = providers.gradleProperty("gpr.key").orNull ?: System.getenv("GITHUB_TOKEN")
-            }
-        }
-        gradlePluginPortal()
-        google()
-        mavenCentral()
-    }
-}
-```
-
-## Quick Start
-
-### 1. Configure the Plugin
-
-```kotlin
-// app/build.gradle.kts
 fontSubsetting {
     fonts {
         create("materialSymbols") {
@@ -66,16 +42,31 @@ fontSubsetting {
             className.set("com.example.icons.MaterialSymbols")
             resourceName.set("symbols")
 
-            stripHinting = true      // Remove hinting (default: true)
-            stripGlyphNames = true   // Remove glyph names (default: true)
+            stripHinting = true
+            stripGlyphNames = true
+
+            axes {
+                axis("FILL").range(0f, 1f, 0f)
+                axis("wght").range(400f, 700f, 400f)
+                axis("GRAD").remove()
+            }
         }
     }
 }
 ```
 
-### 2. Render Icons with Glyph (Recommended)
+### Runtime
 
-The `Glyph` composable renders icons using Android's `Paint` + `Canvas` for optimal performance. It uses `dp` sizing (not `sp`), so icons don't scale with text size preferences.
+Add the runtime library dependency:
+
+```kotlin
+// app/build.gradle.kts
+dependencies {
+    implementation("com.davidmedenjak.fontsubsetting:font-subsetting-runtime:1.0.0")
+}
+```
+
+Use the generated constants with `rememberGlyphPainter`:
 
 ```kotlin
 import com.example.icons.MaterialSymbols
@@ -84,109 +75,44 @@ import com.example.icons.MaterialSymbols
 fun MyScreen() {
     val font = rememberGlyphFont(R.font.symbols)
 
-    Glyph(
-        text = MaterialSymbols.home,  // Type-safe generated constant
-        font = font,
-        size = 24.dp,
-        tint = Color.Black,
+    Icon(
+        painter = rememberGlyphPainter(
+            text = MaterialSymbols.home,
+            font = font,
+            tint = Color.Black,
+        ),
+        contentDescription = "Home",
     )
 }
 ```
 
-### Alternative: Using Text Composable
+## Variable Font Axes
 
-You can also use the standard `Text` composable, though this is less optimized for icon rendering:
-
-```kotlin
-@Composable
-fun MyScreen() {
-    Text(
-        text = MaterialSymbols.home,
-        fontFamily = FontFamily(Font(R.font.symbols)),
-        fontSize = 24.sp,
-    )
-}
-```
-
-## Variable Font Support
-
-The plugin preserves variable font axes for runtime styling and animation.
-
-### Static Axes with Glyph
+The plugin supports subsetting variable font axes -- you can constrain ranges, set defaults, or remove axes entirely to further reduce file size. At runtime, variation settings can be applied per icon, including animated transitions:
 
 ```kotlin
-@Composable
-fun StyledIcon() {
-    val font = rememberGlyphFont(R.font.symbols)
+val fill by animateFloatAsState(if (selected) 1f else 0f)
 
-    Glyph(
+Icon(
+    painter = rememberGlyphPainter(
         text = MaterialSymbols.favorite,
         font = font,
-        size = 24.dp,
-        axes = mapOf("FILL" to 1f, "wght" to 700f),
-    )
-}
+        variation = animateFontVariationAsState(
+            FontVariation.of("FILL" to fill, "wght" to 400f),
+        ),
+    ),
+    contentDescription = "Favorite",
+)
 ```
 
-### Animated Axes with Glyph
+Font variation settings require API 26+. On API 24-25, axis values are ignored and defaults are used.
 
-For animations, use `buildFontVariationSettings` with `remember` for zero-allocation rendering:
-
-```kotlin
-@Composable
-fun AnimatedIcon(selected: Boolean) {
-    val font = rememberGlyphFont(R.font.symbols)
-    val fill by animateFloatAsState(if (selected) 1f else 0f)
-
-    Glyph(
-        text = MaterialSymbols.favorite,
-        font = font,
-        size = 24.dp,
-        fontVariationSettings = remember(fill) {
-            buildFontVariationSettings("FILL" to fill, "wght" to 400f)
-        },
-    )
-}
-```
-
-### Available Axes
-- **FILL** (0-1): Outlined to Filled
-- **wght** (100-700): Thin to Bold
-- **GRAD** (-25-200): Grade adjustment
-- **opsz** (20-48): Optical size
-
-## Advanced: Axis Optimization
-
-Further reduce size by constraining or removing axes:
-
-```kotlin
-fontSubsetting {
-    fonts {
-        create("materialSymbols") {
-            // ... font configuration ...
-
-            axes {
-                axis("FILL").range(0f, 1f, 0f)    // Keep fill with default 0
-                axis("wght").range(400f, 700f, 400f) // Keep only normal-bold
-                axis("GRAD").remove()                // Remove grade axis entirely
-                axis("opsz").range(24f, 48f, 48f)   // Limit optical sizes
-            }
-        }
-    }
-}
-```
-
-## Build Commands
+## Build
 
 ```bash
-# Build and test the subsetting
-./gradlew :demo:assembleDebug
-
-# Run subsetting with verbose output
-./gradlew :demo:subsetDebugFonts --info
-
-# For plugin development (Docker required)
-cd plugin && ./build-in-docker.sh
+./gradlew :demo:assembleDebug              # Build demo app
+./gradlew :demo:subsetDebugFonts --info    # Run subsetting with verbose output
+cd plugin && ./build-in-docker.sh          # Cross-compile native libs (Docker required)
 ```
 
 ## Requirements
@@ -194,7 +120,6 @@ cd plugin && ./build-in-docker.sh
 - Android Gradle Plugin 9.0+
 - Kotlin 2.2+
 - Minimum SDK 24
-
 
 ## License
 

@@ -48,7 +48,6 @@ abstract class FontSubsettingTask : DefaultTask() {
     @get:OutputDirectory
     abstract val outputDirectory: DirectoryProperty
 
-
     @TaskAction
     fun subsetFont() {
         val fontFile = fontFile.get().asFile
@@ -80,7 +79,7 @@ abstract class FontSubsettingTask : DefaultTask() {
     }
 
     private fun loadUsedIcons(usageFile: File): Set<String> {
-        return IconUsageResult.Companion.readFromFile(usageFile).usedIcons
+        return IconUsageResult.readFromFile(usageFile).usedIcons
     }
 
     private fun copyFontWithoutSubsetting(fontFile: File, outputFile: File, reason: String) {

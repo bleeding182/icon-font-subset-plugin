@@ -1,7 +1,11 @@
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
+    `maven-publish`
 }
+
+group = "com.davidmedenjak.fontsubsetting"
+version = providers.gradleProperty("version").getOrElse("1.0.0-SNAPSHOT")
 
 android {
     namespace = "com.davidmedenjak.fontsubsetting.runtime"
@@ -35,6 +39,65 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    publishing {
+        singleVariant("release") {
+            withSourcesJar()
+        }
+    }
+}
+
+publishing {
+    publications {
+        register<MavenPublication>("release") {
+            groupId = group.toString()
+            artifactId = "font-subsetting-runtime"
+            version = project.version.toString()
+
+            afterEvaluate {
+                from(components["release"])
+            }
+
+            pom {
+                name.set("Font Subsetting Runtime")
+                description.set("Android runtime library for font subsetting with HarfBuzz and Compose glyph rendering")
+                url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+
+                licenses {
+                    license {
+                        name.set("MIT License")
+                        url.set("https://opensource.org/licenses/MIT")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("davidmedenjak")
+                        name.set("David Medenjak")
+                    }
+                }
+
+                scm {
+                    connection.set("scm:git:git://github.com/bleeding182/icon-font-subset-plugin.git")
+                    developerConnection.set("scm:git:ssh://github.com/bleeding182/icon-font-subset-plugin.git")
+                    url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+                }
+            }
+        }
+    }
+
+    repositories {
+        val ghUrl = findProperty("githubPackagesUrl") as String?
+        if (ghUrl != null) {
+            maven(ghUrl) {
+                name = "GitHubPackages"
+                credentials {
+                    username = findProperty("githubPackagesUsername") as String? ?: ""
+                    password = findProperty("githubPackagesPassword") as String? ?: ""
+                }
+            }
+        }
     }
 }
 

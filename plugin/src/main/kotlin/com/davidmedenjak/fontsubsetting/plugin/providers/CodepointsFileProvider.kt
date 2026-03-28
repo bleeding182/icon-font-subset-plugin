@@ -2,11 +2,7 @@ package com.davidmedenjak.fontsubsetting.plugin.providers
 
 import java.io.File
 
-/**
- * Provides icon mappings from a codepoints file.
- * The file format is: "icon_name codepoint" per line (e.g., "home e88a")
- */
-class CodepointsFileProvider(
+internal class CodepointsFileProvider(
     private val codepointsFile: File
 ) {
 
