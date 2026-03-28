@@ -28,8 +28,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.davidmedenjak.fontsubsetting.runtime.FontAxisAnimation
+import com.davidmedenjak.fontsubsetting.runtime.GlyphVariationPreset
+import com.davidmedenjak.fontsubsetting.runtime.animateFontVariationAsState
+import com.davidmedenjak.fontsubsetting.runtime.rememberGlyphFont
+import com.davidmedenjak.fontsubsetting.runtime.rememberGlyphPainter
 import com.davidmedenjak.fontsubsetting.ui.theme.FontSubsettingTheme
 
 private val SelectableIcon = GlyphVariationPreset(
@@ -57,29 +61,66 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(modifier: Modifier = Modifier) {
     val font = rememberGlyphFont(R.font.symbols)
-    val fontVariationSettings by animateFontVariationAsState(SelectableIcon)
+    val variation by animateFontVariationAsState(SelectableIcon)
 
-    IconGridDemo(modifier = modifier) { icon, name ->
-        IconCard(name = name) {
-            Icon(
-                painter = rememberGlyphPainter(
-                    text = icon,
-                    font = font,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    fontVariationSettings = fontVariationSettings,
-                ),
-                contentDescription = name,
-                modifier = Modifier,
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer
             )
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(
+                    text = "GlyphPainter Demo",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Native HarfBuzz path extraction via Icon(painter = rememberGlyphPainter(...))",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Animating: FILL (0\u21921) and GRAD (0\u2192200)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
+                )
+            }
         }
-    }
-}
 
-@Preview(showBackground = true)
-@Composable
-fun MainScreenPreview() {
-    FontSubsettingTheme {
-        MainScreen()
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(8),
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(4.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(demoIcons) { (icon, name) ->
+                IconCard(name = name) {
+                    Icon(
+                        painter = rememberGlyphPainter(
+                            text = icon,
+                            font = font,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            variation = variation,
+                        ),
+                        contentDescription = name,
+                        modifier = Modifier,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -126,61 +167,6 @@ private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.close to "close",
     MaterialSymbols.cleanHands to "clean_hands",
 )
-
-@Composable
-fun IconGridDemo(
-    modifier: Modifier = Modifier,
-    iconCard: @Composable (icon: String, name: String) -> Unit
-) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Text(
-                    text = "GlyphPainter Demo",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Paint + Canvas rendering via Icon(painter = rememberGlyphPainter(...))",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Animating: FILL (0\u21921) and GRAD (0\u2192200)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(8),
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(4.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            items(demoIcons) { (icon, name) ->
-                iconCard(icon, name)
-            }
-        }
-    }
-}
 
 @Composable
 private fun IconCard(

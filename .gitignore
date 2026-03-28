@@ -16,6 +16,7 @@ local.properties
 
 # Native build artifacts
 **/CMakeFiles/
+*.o
 .docker-image-id
 
 # Native binaries (generated via build-in-docker.sh)

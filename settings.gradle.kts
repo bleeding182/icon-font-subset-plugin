@@ -43,3 +43,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Font Subsetting"
 include(":demo")
+include(":runtime")
+include(":benchmark")

@@ -1,5 +1,7 @@
 [versions]
 agp = "9.0.1"
+appcompat = "1.7.1"
+benchmarkJunit4 = "1.4.1"
 kotlin = "2.2.20"
 kotlinpoet = "1.14.2"
 coreKtx = "1.17.0"
@@ -12,9 +14,13 @@ composeBom = "2024.09.00"
 assertj = "3.24.2"
 mockito = "5.7.0"
 mockito-kotlin = "5.1.0"
+runner = "1.5.2"
 
 [libraries]
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-benchmark-junit4 = { module = "androidx.benchmark:benchmark-junit4", version.ref = "benchmarkJunit4" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-runner = { module = "androidx.test:runner", version.ref = "runner" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
 androidx-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "espressoCore" }
