@@ -3,6 +3,7 @@ package com.davidmedenjak.fontsubsetting.plugin.tasks
 import com.davidmedenjak.fontsubsetting.analyzer.IconUsageResult
 import com.davidmedenjak.fontsubsetting.native.HarfBuzzSubsetter
 import com.davidmedenjak.fontsubsetting.plugin.NativeSubsetterFactory
+import com.davidmedenjak.fontsubsetting.plugin.services.KotlinNamingService
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.DirectoryProperty
 import org.gradle.api.file.RegularFileProperty
@@ -133,35 +134,20 @@ abstract class FontSubsettingTask : DefaultTask() {
 
     private fun loadCodepoints(codepointsFile: File, usedIcons: Set<String>): Set<Int> {
         val codepoints = mutableSetOf<Int>()
-        val iconNameVariants = createIconNameVariants(usedIcons)
 
         codepointsFile.readLines().forEach { line ->
-            val parts = line.split(' ', limit = 2)
-            if (parts.size >= 2) {
-                val iconNameInFile = parts[0]
-                val codepointHex = parts[1]
+            val parts = line.split(' ', '\t', limit = 2)
+            if (parts.size < 2) return@forEach
+            val codepointName = parts[0]
+            val codepointHex = parts[1]
 
-                if (iconNameVariants.containsKey(iconNameInFile)) {
-                    codepoints.add(codepointHex.toInt(16))
-                }
+            val propertyName = KotlinNamingService.toPropertyName(codepointName)
+            if (propertyName in usedIcons) {
+                codepoints.add(codepointHex.toInt(16))
             }
         }
 
         return codepoints
-    }
-
-    private fun createIconNameVariants(usedIconNames: Set<String>): Map<String, String> {
-        val iconNameVariants = mutableMapOf<String, String>()
-        usedIconNames.forEach { name ->
-            iconNameVariants[name] = name
-            val snakeCase = name.replace(CAMEL_CASE_REGEX) {
-                "${it.groupValues[1]}_${it.groupValues[2].lowercase()}"
-            }
-            if (snakeCase != name) {
-                iconNameVariants[snakeCase] = name
-            }
-        }
-        return iconNameVariants
     }
 
     data class AxisConfig(
@@ -171,8 +157,4 @@ abstract class FontSubsettingTask : DefaultTask() {
         val maxValue: Float?,
         val defaultValue: Float?
     ) : Serializable
-
-    companion object {
-        private val CAMEL_CASE_REGEX = Regex("([a-z])([A-Z])")
-    }
 }
