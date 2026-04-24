@@ -74,29 +74,39 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build all native libraries
-        working-directory: plugin
         run: |
           docker run --rm \
             -v "$PWD:/workspace" \
-            -v "$PWD/build:/workspace/build" \
-            -w /workspace \
+            -w /workspace/plugin \
             fontsubsetting-cross-compiler:local \
             bash -c "
-              mkdir -p /workspace/build/native-cross
-              mkdir -p /workspace/src/main/resources/native
+              mkdir -p /workspace/plugin/build/native-cross
+              mkdir -p /workspace/plugin/src/main/resources/native
+              mkdir -p /workspace/runtime/src/main/resources/native
               chmod +x ./build-all-natives.sh
               ./build-all-natives.sh
             "
 
-      - name: Upload native libraries
+      - name: Upload plugin native libraries
         uses: actions/upload-artifact@v4
         with:
-          name: native-libraries
+          name: plugin-natives
           path: |
             plugin/src/main/resources/native/linux-x86_64/libfontsubsetting.so
             plugin/src/main/resources/native/windows-x86_64/fontsubsetting.dll
             plugin/src/main/resources/native/darwin-x86_64/libfontsubsetting.dylib
             plugin/src/main/resources/native/darwin-aarch64/libfontsubsetting.dylib
+          retention-days: 7
+
+      - name: Upload runtime native libraries
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-natives
+          path: |
+            runtime/src/main/resources/native/linux-x86_64/glyphruntime.bin
+            runtime/src/main/resources/native/windows-x86_64/glyphruntime.bin
+            runtime/src/main/resources/native/darwin-x86_64/glyphruntime.bin
+            runtime/src/main/resources/native/darwin-aarch64/glyphruntime.bin
           retention-days: 7
 
   # ==========================================================================
@@ -136,7 +146,7 @@ jobs:
       - name: Download native libraries
         uses: actions/download-artifact@v4
         with:
-          name: native-libraries
+          name: plugin-natives
           path: plugin/src/main/resources/native
 
       - name: Verify native library exists
@@ -205,16 +215,25 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Publishing version: $VERSION"
 
-      - name: Download native libraries
+      - name: Download plugin native libraries
         uses: actions/download-artifact@v4
         with:
-          name: native-libraries
+          name: plugin-natives
           path: plugin/src/main/resources/native
+
+      - name: Download runtime native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: runtime-natives
+          path: runtime/src/main/resources/native
 
       - name: Verify native libraries
         run: |
-          echo "Native libraries for packaging:"
+          echo "Plugin native libraries for packaging:"
           find plugin/src/main/resources/native -type f \( -name "*.so" -o -name "*.dll" -o -name "*.dylib" \) \
+            -exec ls -lh {} \;
+          echo "Runtime native libraries for packaging:"
+          find runtime/src/main/resources/native -type f -name "glyphruntime.bin" \
             -exec ls -lh {} \;
 
       - name: Setup Gradle
