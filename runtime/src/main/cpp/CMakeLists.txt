@@ -74,13 +74,21 @@ target_compile_definitions(harfbuzz PRIVATE
     HB_NO_OT_FONT_CMAP_CACHE
 )
 
-# Size optimization flags for HarfBuzz
-target_compile_options(harfbuzz PRIVATE
-    -Oz -fno-exceptions -fno-rtti -flto
+# Size optimization flags for HarfBuzz. LTO is excluded on cross-compile
+# targets: on MinGW, CMake resets CMAKE_AR to plain binutils `ar` during
+# compiler detection (dropping the LTO symbol table from libharfbuzz.a); on
+# Apple via Zig, clang errors "LTO requires using LLD" because Zig links
+# through the system ld. Linux/Android keep LTO.
+set(HB_SIZE_FLAGS
+    -Oz -fno-exceptions -fno-rtti
     -fno-unwind-tables -fno-asynchronous-unwind-tables
     -ffunction-sections -fdata-sections
     -fvisibility=hidden -fvisibility-inlines-hidden
 )
+if(NOT WIN32 AND NOT APPLE)
+    list(APPEND HB_SIZE_FLAGS -flto)
+endif()
+target_compile_options(harfbuzz PRIVATE ${HB_SIZE_FLAGS})
 
 # --- Our JNI library (pure C, no STL) ---
 add_library(glyphruntime SHARED
@@ -98,9 +106,19 @@ if(ANDROID)
     find_library(log-lib log)
     target_link_libraries(glyphruntime ${log-lib})
 else()
-    # Host builds (Compose preview, Paparazzi/Roborazzi, tests) need JNI headers
-    # from the build-host JDK. JAVA_HOME must be set by the build script.
-    find_package(JNI REQUIRED)
+    # Host builds (Compose preview, Paparazzi/Roborazzi, tests) need JNI headers.
+    # For cross-compile targets (MinGW, Zig/Darwin) the sysroot has no JDK, so
+    # find_package(JNI) fails — use the build-host JDK headers instead. They are
+    # portable enough for header-only use since we don't link against libjvm.
+    if(DEFINED ENV{JAVA_HOME})
+        set(JNI_INCLUDE_DIRS
+            $ENV{JAVA_HOME}/include
+            $ENV{JAVA_HOME}/include/linux
+        )
+        message(STATUS "Using JAVA_HOME for JNI: $ENV{JAVA_HOME}")
+    else()
+        find_package(JNI REQUIRED)
+    endif()
     target_include_directories(glyphruntime PRIVATE ${JNI_INCLUDE_DIRS})
 endif()
 
@@ -109,11 +127,15 @@ set_target_properties(glyphruntime PROPERTIES
     C_VISIBILITY_PRESET hidden
 )
 
-target_compile_options(glyphruntime PRIVATE
-    -Oz -flto
+set(GLYPHRUNTIME_COMPILE_OPTS
+    -Oz
     -fno-unwind-tables -fno-asynchronous-unwind-tables
     -ffunction-sections -fdata-sections
 )
+if(NOT WIN32 AND NOT APPLE)
+    list(APPEND GLYPHRUNTIME_COMPILE_OPTS -flto)
+endif()
+target_compile_options(glyphruntime PRIVATE ${GLYPHRUNTIME_COMPILE_OPTS})
 
 # Linker flags vary by platform. GNU ld (Android/Linux) supports the full set;
 # MinGW ld rejects --exclude-libs=ALL; lld (macOS via Zig) rejects most GNU flags.
@@ -122,11 +144,16 @@ if(ANDROID OR (CMAKE_SYSTEM_NAME STREQUAL "Linux"))
         LINK_FLAGS "-Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--discard-all -s -flto"
     )
 elseif(WIN32)
+    # MinGW prefixes shared libs with "lib" by default; strip it so the
+    # artifact name matches what the build script expects (glyphruntime.dll).
     set_target_properties(glyphruntime PROPERTIES
-        LINK_FLAGS "-Wl,--gc-sections -s -static -flto"
+        PREFIX ""
+        LINK_FLAGS "-Wl,--gc-sections -s -static"
     )
 elseif(APPLE)
+    # Zig's clang links through the system ld which doesn't support LTO;
+    # building with -flto here errors "LTO requires using LLD". Skip it.
     set_target_properties(glyphruntime PROPERTIES
-        LINK_FLAGS "-flto"
+        LINK_FLAGS ""
     )
 endif()
