@@ -8,26 +8,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalInspectionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
  * Remembers a [GlyphFont] loaded from a font resource.
  *
- * In Compose preview / [LocalInspectionMode] the native library is not touched — a
- * sentinel font is returned and [rememberGlyphPainter] draws a placeholder outline.
+ * If loading the font or the HarfBuzz native library fails (e.g. a Compose preview
+ * on a host without a bundled native), a sentinel font is returned and
+ * [rememberGlyphPainter] draws a placeholder outline.
  */
 @Composable
 fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
-    if (LocalInspectionMode.current) {
-        return remember { GlyphFont(null) }
-    }
     val context = LocalContext.current
     val font = remember(resourceId) {
-        @Suppress("ResourceType")
-        val bytes = context.resources.openRawResource(resourceId).use { it.readBytes() }
-        GlyphFont(HarfBuzzGlyphExtractor(bytes))
+        runCatching {
+            @Suppress("ResourceType")
+            val bytes = context.resources.openRawResource(resourceId).use { it.readBytes() }
+            GlyphFont(HarfBuzzGlyphExtractor(bytes))
+        }.getOrElse { GlyphFont(null) }
     }
     DisposableEffect(font) {
         onDispose { font.extractor?.close() }
