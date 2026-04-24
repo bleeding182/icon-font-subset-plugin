@@ -124,6 +124,10 @@ publishing {
 
 // Maven Central requires signed artifacts; GitHub Packages does not. Skip signing
 // when no key is configured so GitHub Packages publishes succeed without credentials.
+// Set `enabled` directly (no onlyIf closure) so the config cache doesn't have to
+// serialize a Spec that captures the enclosing build script.
+val hasSigningKey = providers.gradleProperty("signingInMemoryKey").isPresent ||
+    providers.gradleProperty("signing.keyId").isPresent
 tasks.withType<Sign>().configureEach {
-    onlyIf { project.hasProperty("signingInMemoryKey") || project.hasProperty("signing.keyId") }
+    enabled = hasSigningKey
 }
