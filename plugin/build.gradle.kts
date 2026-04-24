@@ -121,3 +121,9 @@ publishing {
         }
     }
 }
+
+// Maven Central requires signed artifacts; GitHub Packages does not. Skip signing
+// when no key is configured so GitHub Packages publishes succeed without credentials.
+tasks.withType<Sign>().configureEach {
+    onlyIf { project.hasProperty("signingInMemoryKey") || project.hasProperty("signing.keyId") }
+}
