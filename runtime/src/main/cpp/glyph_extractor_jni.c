@@ -1,13 +1,22 @@
 #include <jni.h>
-#include <android/log.h>
 #include <stdlib.h>
 #include "glyph_extractor.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
 #define LOG_TAG "GlyphExtractor"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#include <stdio.h>
+#define LOGE(...) do { fprintf(stderr, "[GlyphExtractor] " __VA_ARGS__); fputc('\n', stderr); } while (0)
+#endif
 
 /* JNI export visibility */
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define JNI_EXPORT __declspec(dllexport)
+#else
 #define JNI_EXPORT __attribute__((visibility("default")))
+#endif
 
 static hb_tag_t tag_from_string(const char* s) {
     return HB_TAG(s[0], s[1], s[2], s[3]);

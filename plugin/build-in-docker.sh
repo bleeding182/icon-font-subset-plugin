@@ -28,24 +28,31 @@ if [ "$BUILD_IMAGE" = true ]; then
     docker images -q $IMAGE_NAME > "${SCRIPT_DIR}/.docker-image-id"
 fi
 
+REPO_ROOT="$( cd "${SCRIPT_DIR}/.." && pwd )"
+
 echo ""
 echo "Running cross-compilation in Docker..."
-# Mount the workspace and preserve build directory between runs
+# Mount the repo root so both plugin/ and runtime/ sources are visible, and
+# preserve the plugin's build directory (shared cache + runtime build outputs).
 docker run --rm \
-    -v "${SCRIPT_DIR}:/workspace" \
-    -v "${SCRIPT_DIR}/build:/workspace/build" \
-    -w /workspace \
+    -v "${REPO_ROOT}:/workspace" \
+    -v "${SCRIPT_DIR}/build:/workspace/plugin/build" \
+    -w /workspace/plugin \
     $IMAGE_NAME \
     bash -c "
-        # Ensure build directories exist
-        mkdir -p /workspace/build/native-cross
-        mkdir -p /workspace/src/main/resources/native
-        
-        # Run the build script
+        mkdir -p /workspace/plugin/build/native-cross
+        mkdir -p /workspace/plugin/build/runtime-native-cross
+        mkdir -p /workspace/plugin/src/main/resources/native
+        mkdir -p /workspace/runtime/src/main/resources/native
+
         ./build-all-natives.sh
     "
 
 echo ""
-echo "Build complete! Native libraries are in:"
-echo "${SCRIPT_DIR}/src/main/resources/native/"
-ls -la "${SCRIPT_DIR}/src/main/resources/native/"/* 2>/dev/null || echo "No libraries found"
+echo "Build complete!"
+echo ""
+echo "Plugin libraries:  ${SCRIPT_DIR}/src/main/resources/native/"
+ls -la "${SCRIPT_DIR}/src/main/resources/native/"/* 2>/dev/null || echo "  (no libraries found)"
+echo ""
+echo "Runtime libraries: ${REPO_ROOT}/runtime/src/main/resources/native/"
+ls -la "${REPO_ROOT}/runtime/src/main/resources/native/"/* 2>/dev/null || echo "  (no libraries found)"

@@ -1,6 +1,7 @@
 package com.davidmedenjak.fontsubsetting.runtime
 
 import android.graphics.Path
+import java.io.File
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
@@ -15,27 +16,21 @@ import kotlin.concurrent.withLock
  */
 class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoCloseable {
 
-    private var handle: Long = nativeCreateFont(fontData)
+    private var handle: Long
     private val lock = ReentrantLock()
 
     init {
+        ensureLibraryLoaded()
+        handle = nativeCreateFont(fontData)
         check(handle != 0L) { "Failed to create HarfBuzz font from data" }
     }
 
-    /**
-     * Extracts a glyph outline as a [Path] in em-normalized coordinates (1.0 = 1 em).
-     * Returns null if the codepoint is not found in the font.
-     */
     fun extractPath(codepoint: Int, axisTags: Array<String>, axisValues: FloatArray): Path? =
         lock.withLock {
             val data = nativeExtractGlyph(handle, codepoint, axisTags, axisValues) ?: return null
             data.toAndroidPath()
         }
 
-    /**
-     * Batch extraction: same glyph with multiple variation settings in one JNI round-trip.
-     * [axisValues] is a flattened array of `axisTags.size * numSets` entries.
-     */
     fun extractPathBatch(
         codepoint: Int,
         axisTags: Array<String>,
@@ -57,11 +52,100 @@ class HarfBuzzGlyphExtractor internal constructor(fontData: ByteArray) : AutoClo
     }
 
     companion object {
-        init {
-            System.loadLibrary("glyphruntime")
-        }
+        private val LOAD_LOCK = Any()
+
+        @Volatile
+        private var loaded = false
+
+        @Volatile
+        private var loadError: Throwable? = null
 
         fun create(fontData: ByteArray): HarfBuzzGlyphExtractor = HarfBuzzGlyphExtractor(fontData)
+
+        /**
+         * Returns true if the native library is available on this platform.
+         * Never throws — useful for probing support (e.g. Paparazzi/Roborazzi checks).
+         */
+        fun isNativeLibraryAvailable(): Boolean = try {
+            ensureLibraryLoaded()
+            true
+        } catch (e: Throwable) {
+            false
+        }
+
+        internal fun ensureLibraryLoaded() {
+            if (loaded) return
+            synchronized(LOAD_LOCK) {
+                if (loaded) return
+                loadError?.let { throw it }
+                try {
+                    loadNativeLibrary()
+                    loaded = true
+                } catch (t: Throwable) {
+                    loadError = t
+                    throw t
+                }
+            }
+        }
+
+        private fun loadNativeLibrary() {
+            try {
+                System.loadLibrary("glyphruntime")
+                return
+            } catch (e: UnsatisfiedLinkError) {
+                // Fall back to extracting a bundled resource (host JVMs: Compose preview,
+                // Paparazzi/Roborazzi, unit tests).
+            }
+            loadFromResources()
+        }
+
+        private fun loadFromResources() {
+            val (osName, archName, suffix) = getPlatformInfo()
+            // Bundled as glyphruntime.bin because AGP strips *.so / *.dll /
+            // *.dylib from Android library Java resources. Rename back to the
+            // OS-native extension before System.load().
+            val resourcePath = "/native/$osName-$archName/glyphruntime.bin"
+            val stream = HarfBuzzGlyphExtractor::class.java.getResourceAsStream(resourcePath)
+                ?: throw UnsatisfiedLinkError(
+                    "HarfBuzz glyph runtime native library not available for " +
+                        "${System.getProperty("os.name")} / ${System.getProperty("os.arch")}. " +
+                        "Missing classpath resource: $resourcePath"
+                )
+
+            val tempFile = File.createTempFile("glyphruntime", suffix)
+            tempFile.deleteOnExit()
+            stream.use { input ->
+                tempFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            System.load(tempFile.absolutePath)
+        }
+
+        /** Returns (osDir, archDir, tempFileSuffix). */
+        private fun getPlatformInfo(): Triple<String, String, String> {
+            val os = System.getProperty("os.name").orEmpty().lowercase()
+            val arch = System.getProperty("os.arch").orEmpty().lowercase()
+
+            val osName = when {
+                os.contains("win") -> "windows"
+                os.contains("mac") || os.contains("darwin") -> "darwin"
+                os.contains("linux") -> "linux"
+                else -> os.replace(" ", "_")
+            }
+
+            val archName = when (arch) {
+                "x86_64", "amd64" -> "x86_64"
+                "aarch64", "arm64" -> "aarch64"
+                else -> arch
+            }
+
+            val suffix = when (osName) {
+                "windows" -> ".dll"
+                "darwin" -> ".dylib"
+                else -> ".so"
+            }
+
+            return Triple(osName, archName, suffix)
+        }
     }
 
     private external fun nativeCreateFont(data: ByteArray): Long

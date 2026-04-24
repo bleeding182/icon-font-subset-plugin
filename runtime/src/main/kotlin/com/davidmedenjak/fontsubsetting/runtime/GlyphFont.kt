@@ -5,5 +5,5 @@ import androidx.compose.runtime.Immutable
 @JvmInline
 @Immutable
 value class GlyphFont internal constructor(
-    internal val extractor: HarfBuzzGlyphExtractor,
+    internal val extractor: HarfBuzzGlyphExtractor?,
 )

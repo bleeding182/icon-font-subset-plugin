@@ -23,6 +23,7 @@ local.properties
 **/src/main/resources/native/**/*.so
 **/src/main/resources/native/**/*.dll
 **/src/main/resources/native/**/*.dylib
+**/src/main/resources/native/**/*.bin
 
 # Kotlin/Java
 *.class

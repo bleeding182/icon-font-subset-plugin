@@ -83,8 +83,6 @@ target_compile_options(harfbuzz PRIVATE
 )
 
 # --- Our JNI library (pure C, no STL) ---
-find_library(log-lib log)
-
 add_library(glyphruntime SHARED
     glyph_extractor.c
     glyph_extractor_jni.c
@@ -94,10 +92,17 @@ target_include_directories(glyphruntime PRIVATE
     ${harfbuzz_SOURCE_DIR}/src
 )
 
-target_link_libraries(glyphruntime
-    harfbuzz
-    ${log-lib}
-)
+target_link_libraries(glyphruntime harfbuzz)
+
+if(ANDROID)
+    find_library(log-lib log)
+    target_link_libraries(glyphruntime ${log-lib})
+else()
+    # Host builds (Compose preview, Paparazzi/Roborazzi, tests) need JNI headers
+    # from the build-host JDK. JAVA_HOME must be set by the build script.
+    find_package(JNI REQUIRED)
+    target_include_directories(glyphruntime PRIVATE ${JNI_INCLUDE_DIRS})
+endif()
 
 # Hide all symbols except JNI exports
 set_target_properties(glyphruntime PROPERTIES
@@ -110,6 +115,18 @@ target_compile_options(glyphruntime PRIVATE
     -ffunction-sections -fdata-sections
 )
 
-set_target_properties(glyphruntime PROPERTIES
-    LINK_FLAGS "-Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--discard-all -s -flto"
-)
+# Linker flags vary by platform. GNU ld (Android/Linux) supports the full set;
+# MinGW ld rejects --exclude-libs=ALL; lld (macOS via Zig) rejects most GNU flags.
+if(ANDROID OR (CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    set_target_properties(glyphruntime PROPERTIES
+        LINK_FLAGS "-Wl,--gc-sections -Wl,--exclude-libs,ALL -Wl,--discard-all -s -flto"
+    )
+elseif(WIN32)
+    set_target_properties(glyphruntime PROPERTIES
+        LINK_FLAGS "-Wl,--gc-sections -s -static -flto"
+    )
+elseif(APPLE)
+    set_target_properties(glyphruntime PROPERTIES
+        LINK_FLAGS "-flto"
+    )
+endif()

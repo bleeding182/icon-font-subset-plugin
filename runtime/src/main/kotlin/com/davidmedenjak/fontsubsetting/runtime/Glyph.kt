@@ -8,14 +8,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalInspectionMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
  * Remembers a [GlyphFont] loaded from a font resource.
+ *
+ * In Compose preview / [LocalInspectionMode] the native library is not touched — a
+ * sentinel font is returned and [rememberGlyphPainter] draws a placeholder outline.
  */
 @Composable
 fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
+    if (LocalInspectionMode.current) {
+        return remember { GlyphFont(null) }
+    }
     val context = LocalContext.current
     val font = remember(resourceId) {
         @Suppress("ResourceType")
@@ -23,7 +30,7 @@ fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
         GlyphFont(HarfBuzzGlyphExtractor(bytes))
     }
     DisposableEffect(font) {
-        onDispose { font.extractor.close() }
+        onDispose { font.extractor?.close() }
     }
     return font
 }
@@ -49,10 +56,11 @@ fun rememberGlyphPainter(
         it.variation = variation
     }
 
+    val extractor = font.extractor
     val allFrames = variation.allFrames
     LaunchedEffect(painter, allFrames) {
+        if (extractor == null) return@LaunchedEffect
         if (allFrames == null || allFrames.size <= 1) return@LaunchedEffect
-        val extractor = font.extractor
         val axisTags = allFrames[0].axes
         if (axisTags.isEmpty()) return@LaunchedEffect
 

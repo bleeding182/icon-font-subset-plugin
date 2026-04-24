@@ -18,11 +18,14 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Glyph paths are cached per variation setting and drawn in em-normalized coordinates,
  * scaled to the target size.
+ *
+ * When [extractor] is null (Compose preview / host JVM without native libs), the painter
+ * draws a thin outline box at the draw bounds as a placeholder.
  */
 @Stable
 class GlyphPainter internal constructor(
     private val codepoint: Int,
-    private val extractor: HarfBuzzGlyphExtractor,
+    private val extractor: HarfBuzzGlyphExtractor?,
 ) : Painter() {
 
     private val drawPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -60,6 +63,12 @@ class GlyphPainter internal constructor(
         val h = size.height
         if (w <= 0f || h <= 0f) return
 
+        val extractor = extractor
+        if (extractor == null) {
+            drawPlaceholder(w, h, argb)
+            return
+        }
+
         val path = pathCache.getOrPut(v) {
             extractor.extractPath(codepoint, v.axes, v.values) ?: run {
                 Log.w("GlyphPainter", "Glyph not found for codepoint U+${codepoint.toString(16).uppercase()}")
@@ -69,6 +78,7 @@ class GlyphPainter internal constructor(
 
         val s = minOf(w, h)
         drawPaint.color = argb
+        drawPaint.style = Paint.Style.FILL
         with(drawContext.canvas.nativeCanvas) {
             save()
             translate(w / 2f, h / 2f)
@@ -77,5 +87,13 @@ class GlyphPainter internal constructor(
             drawPath(path, drawPaint)
             restore()
         }
+    }
+
+    private fun DrawScope.drawPlaceholder(w: Float, h: Float, argb: Int) {
+        drawPaint.color = argb
+        drawPaint.style = Paint.Style.STROKE
+        drawPaint.strokeWidth = 1f * density
+        val inset = drawPaint.strokeWidth / 2f
+        drawContext.canvas.nativeCanvas.drawRect(inset, inset, w - inset, h - inset, drawPaint)
     }
 }
