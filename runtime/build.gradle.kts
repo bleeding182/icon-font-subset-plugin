@@ -1,7 +1,10 @@
+import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.compose)
     `maven-publish`
+    alias(libs.plugins.maven.publish.vanniktech)
 }
 
 group = "com.davidmedenjak.fontsubsetting"
@@ -40,53 +43,43 @@ android {
     buildFeatures {
         compose = true
     }
+}
 
-    publishing {
-        singleVariant("release") {
-            withSourcesJar()
+mavenPublishing {
+    configure(AndroidSingleVariantLibrary(variant = "release", sourcesJar = true, publishJavadocJar = true))
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
+
+    coordinates(group.toString(), "font-subsetting-runtime", version.toString())
+
+    pom {
+        name.set("Font Subsetting Runtime")
+        description.set("Android runtime library for font subsetting with HarfBuzz and Compose glyph rendering")
+        url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
+            }
+        }
+
+        developers {
+            developer {
+                id.set("davidmedenjak")
+                name.set("David Medenjak")
+            }
+        }
+
+        scm {
+            connection.set("scm:git:git://github.com/bleeding182/icon-font-subset-plugin.git")
+            developerConnection.set("scm:git:ssh://github.com/bleeding182/icon-font-subset-plugin.git")
+            url.set("https://github.com/bleeding182/icon-font-subset-plugin")
         }
     }
 }
 
 publishing {
-    publications {
-        register<MavenPublication>("release") {
-            groupId = group.toString()
-            artifactId = "font-subsetting-runtime"
-            version = project.version.toString()
-
-            afterEvaluate {
-                from(components["release"])
-            }
-
-            pom {
-                name.set("Font Subsetting Runtime")
-                description.set("Android runtime library for font subsetting with HarfBuzz and Compose glyph rendering")
-                url.set("https://github.com/bleeding182/icon-font-subset-plugin")
-
-                licenses {
-                    license {
-                        name.set("MIT License")
-                        url.set("https://opensource.org/licenses/MIT")
-                    }
-                }
-
-                developers {
-                    developer {
-                        id.set("davidmedenjak")
-                        name.set("David Medenjak")
-                    }
-                }
-
-                scm {
-                    connection.set("scm:git:git://github.com/bleeding182/icon-font-subset-plugin.git")
-                    developerConnection.set("scm:git:ssh://github.com/bleeding182/icon-font-subset-plugin.git")
-                    url.set("https://github.com/bleeding182/icon-font-subset-plugin")
-                }
-            }
-        }
-    }
-
     repositories {
         val ghUrl = findProperty("githubPackagesUrl") as String?
         if (ghUrl != null) {

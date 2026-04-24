@@ -1,8 +1,11 @@
-﻿plugins {
+﻿import com.vanniktech.maven.publish.GradlePublishPlugin
+
+plugins {
     `java-gradle-plugin`
     alias(libs.plugins.kotlin.jvm)
     `maven-publish`
     id("com.gradle.plugin-publish") version "2.0.0"
+    alias(libs.plugins.maven.publish.vanniktech)
 }
 
 group = "com.davidmedenjak.fontsubsetting"
@@ -70,35 +73,41 @@ tasks.test {
     }
 }
 
-publishing {
-    publications.withType<MavenPublication>().configureEach {
-        pom {
-            name.set("Font Subsetting Plugin")
-            description.set("Gradle plugin for automatic font subsetting based on usage in Android apps")
-            url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+mavenPublishing {
+    configure(GradlePublishPlugin())
+    publishToMavenCentral(automaticRelease = true)
+    signAllPublications()
 
-            licenses {
-                license {
-                    name.set("MIT License")
-                    url.set("https://opensource.org/licenses/MIT")
-                }
-            }
+    coordinates(group.toString(), "font-subsetting-plugin", version.toString())
 
-            developers {
-                developer {
-                    id.set("davidmedenjak")
-                    name.set("David Medenjak")
-                }
-            }
+    pom {
+        name.set("Font Subsetting Plugin")
+        description.set("Gradle plugin for automatic font subsetting based on usage in Android apps")
+        url.set("https://github.com/bleeding182/icon-font-subset-plugin")
 
-            scm {
-                connection.set("scm:git:git://github.com/bleeding182/icon-font-subset-plugin.git")
-                developerConnection.set("scm:git:ssh://github.com/bleeding182/icon-font-subset-plugin.git")
-                url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+        licenses {
+            license {
+                name.set("MIT License")
+                url.set("https://opensource.org/licenses/MIT")
             }
         }
-    }
 
+        developers {
+            developer {
+                id.set("davidmedenjak")
+                name.set("David Medenjak")
+            }
+        }
+
+        scm {
+            connection.set("scm:git:git://github.com/bleeding182/icon-font-subset-plugin.git")
+            developerConnection.set("scm:git:ssh://github.com/bleeding182/icon-font-subset-plugin.git")
+            url.set("https://github.com/bleeding182/icon-font-subset-plugin")
+        }
+    }
+}
+
+publishing {
     repositories {
         val ghUrl = findProperty("githubPackagesUrl") as String?
         if (ghUrl != null) {

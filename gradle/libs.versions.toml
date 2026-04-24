@@ -15,6 +15,7 @@ assertj = "3.24.2"
 mockito = "5.7.0"
 mockito-kotlin = "5.1.0"
 runner = "1.5.2"
+mavenPublish = "0.34.0"
 
 [libraries]
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
@@ -52,4 +53,5 @@ android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+maven-publish-vanniktech = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }
 
