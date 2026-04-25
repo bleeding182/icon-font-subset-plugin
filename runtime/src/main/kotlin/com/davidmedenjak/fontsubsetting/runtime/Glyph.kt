@@ -1,5 +1,7 @@
 package com.davidmedenjak.fontsubsetting.runtime
 
+import android.content.Context
+import android.graphics.Typeface
 import androidx.annotation.FontRes
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -8,30 +10,59 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.res.ResourcesCompat
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
  * Remembers a [GlyphFont] loaded from a font resource.
  *
- * If loading the font or the HarfBuzz native library fails (e.g. a Compose preview
- * on a host without a bundled native), a sentinel font is returned and
- * [rememberGlyphPainter] draws a placeholder outline.
+ * On Android the font is rendered via the HarfBuzz JNI extractor. When the native
+ * library can't be loaded (Compose preview / Paparazzi / plain JVM unit tests),
+ * the font falls back to an [android.graphics.Typeface] so previews still draw the
+ * real glyph through the platform Paint stack.
  */
 @Composable
 fun rememberGlyphFont(@FontRes resourceId: Int): GlyphFont {
     val context = LocalContext.current
     val font = remember(resourceId) {
-        runCatching {
-            @Suppress("ResourceType")
-            val bytes = context.resources.openRawResource(resourceId).use { it.readBytes() }
-            GlyphFont(HarfBuzzGlyphExtractor(bytes))
-        }.getOrElse { GlyphFont(null) }
+        @Suppress("ResourceType")
+        val bytes = runCatching {
+            context.resources.openRawResource(resourceId).use { it.readBytes() }
+        }.getOrNull() ?: return@remember GlyphFont(extractor = null)
+
+        runCatching { GlyphFont(extractor = HarfBuzzGlyphExtractor(bytes)) }
+            .getOrElse {
+                GlyphFont(
+                    extractor = null,
+                    previewTypeface = loadPreviewTypeface(context, resourceId, bytes),
+                )
+            }
     }
     DisposableEffect(font) {
         onDispose { font.extractor?.close() }
     }
     return font
+}
+
+// Layoutlib (Compose preview engine) renders the font resource directly when we
+// go through ResourcesCompat — Typeface.createFromFile silently returns the
+// default typeface and drawText then renders tofu for Material Symbols' PUA
+// codepoints, which is what produced the square placeholders.
+private fun loadPreviewTypeface(context: Context, resourceId: Int, bytes: ByteArray): Typeface? {
+    runCatching { ResourcesCompat.getFont(context, resourceId) }
+        .getOrNull()
+        ?.takeIf { it != Typeface.DEFAULT }
+        ?.let { return it }
+
+    return runCatching {
+        val cacheFile = File(context.cacheDir, "fontsubsetting-preview-$resourceId.ttf")
+        if (!cacheFile.exists() || cacheFile.length() != bytes.size.toLong()) {
+            cacheFile.writeBytes(bytes)
+        }
+        Typeface.createFromFile(cacheFile)
+    }.getOrNull()
 }
 
 /**
@@ -48,8 +79,9 @@ fun rememberGlyphPainter(
     variation: FontVariation = FontVariation.Empty,
 ): Painter {
     val codepoint = remember(text) { text.codePointAt(0) }
+    val glyphText = remember(codepoint) { String(Character.toChars(codepoint)) }
     val painter = remember(codepoint, font) {
-        GlyphPainter(codepoint, font.extractor)
+        GlyphPainter(codepoint, glyphText, font)
     }.also {
         it.tint = tint
         it.variation = variation

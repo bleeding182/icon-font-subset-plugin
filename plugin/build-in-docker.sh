@@ -32,8 +32,8 @@ REPO_ROOT="$( cd "${SCRIPT_DIR}/.." && pwd )"
 
 echo ""
 echo "Running cross-compilation in Docker..."
-# Mount the repo root so both plugin/ and runtime/ sources are visible, and
-# preserve the plugin's build directory (shared cache + runtime build outputs).
+# Mount the repo root so plugin sources are visible, and preserve the plugin's
+# build directory across runs.
 docker run --rm \
     -v "${REPO_ROOT}:/workspace" \
     -v "${SCRIPT_DIR}/build:/workspace/plugin/build" \
@@ -41,9 +41,7 @@ docker run --rm \
     $IMAGE_NAME \
     bash -c "
         mkdir -p /workspace/plugin/build/native-cross
-        mkdir -p /workspace/plugin/build/runtime-native-cross
         mkdir -p /workspace/plugin/src/main/resources/native
-        mkdir -p /workspace/runtime/src/main/resources/native
 
         ./build-all-natives.sh
     "
@@ -53,6 +51,3 @@ echo "Build complete!"
 echo ""
 echo "Plugin libraries:  ${SCRIPT_DIR}/src/main/resources/native/"
 ls -la "${SCRIPT_DIR}/src/main/resources/native/"/* 2>/dev/null || echo "  (no libraries found)"
-echo ""
-echo "Runtime libraries: ${REPO_ROOT}/runtime/src/main/resources/native/"
-ls -la "${REPO_ROOT}/runtime/src/main/resources/native/"/* 2>/dev/null || echo "  (no libraries found)"
