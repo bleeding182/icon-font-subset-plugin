@@ -13,38 +13,35 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /LTCG /OPT:REF /OPT:ICF")
     else()
         # GCC/Clang optimization flags
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -DNDEBUG")
-        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -DNDEBUG")
-        
-        # Additional optimization flags for size
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Oz -fno-exceptions -fno-rtti")
-        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -Oz")
-        
-        # Visibility settings - hide all symbols by default (already configured for target below)
-        # These flags help the compiler optimize better when symbols are hidden
+        set(SIZE_C_FLAGS "-DNDEBUG -Oz -ffunction-sections -fdata-sections")
+        # Exceptions are off, so eh_frame and stack canaries are pure overhead.
+        set(SIZE_C_FLAGS "${SIZE_C_FLAGS} -fno-unwind-tables -fno-asynchronous-unwind-tables -fno-stack-protector")
+
+        set(CMAKE_C_FLAGS_RELEASE   "${CMAKE_C_FLAGS_RELEASE} ${SIZE_C_FLAGS}")
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${SIZE_C_FLAGS} -fno-exceptions -fno-rtti")
+
+        # Visibility — only JNI functions get __attribute__((visibility("default"))).
+        set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS} -fvisibility=hidden")
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden -fvisibility-inlines-hidden")
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
-        
-        # Enable function and data sections for better dead code elimination
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -ffunction-sections -fdata-sections")
-        set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -ffunction-sections -fdata-sections")
-        
-        # Link-time optimization
+
+        # Link-time optimization. Disabled for APPLE because Zig-clang's
+        # Mach-O target refuses LTO at compile time ("LTO requires using
+        # LLD") even though Zig itself uses LLD — its detection through the
+        # wrapper script doesn't recognize that.
         if(NOT APPLE)
+            set(CMAKE_C_FLAGS_RELEASE   "${CMAKE_C_FLAGS_RELEASE} -flto")
             set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -flto")
-            set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -flto")
+            set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -flto")
         endif()
-        
-        # Linker flags for garbage collection of unused sections
-        if(NOT APPLE)
-            set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--gc-sections")
+
+        if(APPLE)
+            # Zig 0.15.1's lld accepts -S (strip debug) and -x (strip
+            # non-global symbols) for Mach-O. Saves ~1MB per dylib vs the
+            # unstripped baseline.
+            set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,-dead_strip -Wl,-S -Wl,-x")
         else()
-            # Aggressive dead stripping for macOS (Zig doesn't support -x or -S)
-            set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,-dead_strip")
+            set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -Wl,--as-needed -Wl,--build-id=none -s")
         endif()
-        
-        # Strip symbols for Release builds
-        set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
     endif()
 endif()
 
@@ -82,77 +79,46 @@ message(STATUS "JNI include dirs: ${JNI_INCLUDE_DIRS}")
 
 # Find HarfBuzz
 # We've pre-installed HarfBuzz in the Docker container
+# HarfBuzz is pre-built per-target in the cross-compile Docker image and
+# installed under /usr/local/<system>-<arch>/. The Windows MinGW build sits
+# in the mingw sysroot for find_package compatibility. libharfbuzz-subset.a
+# has its duplicate-of-harfbuzz.cc objects stripped in the Dockerfile, so we
+# don't need --allow-multiple-definition.
 if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR WIN32 OR MINGW)
-    # For Windows cross-compilation (Ubuntu MinGW paths)
-    set(HARFBUZZ_INCLUDE_DIRS /usr/x86_64-w64-mingw32/include/harfbuzz)
-    # Link both libraries - subset needs base library symbols
+    set(_HB_PREFIX /usr/x86_64-w64-mingw32)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(_HB_PREFIX /usr/local/darwin-${CMAKE_SYSTEM_PROCESSOR})
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set(_HB_PREFIX /usr/local/linux-${CMAKE_SYSTEM_PROCESSOR})
+endif()
+
+if(_HB_PREFIX AND EXISTS "${_HB_PREFIX}/lib/libharfbuzz-subset.a")
+    set(HARFBUZZ_INCLUDE_DIRS ${_HB_PREFIX}/include/harfbuzz)
     set(HARFBUZZ_LIBRARIES
-        /usr/x86_64-w64-mingw32/lib/libharfbuzz-subset.a
-        /usr/x86_64-w64-mingw32/lib/libharfbuzz.a
+        ${_HB_PREFIX}/lib/libharfbuzz-subset.a
+        ${_HB_PREFIX}/lib/libharfbuzz.a
     )
     set(HARFBUZZ_FOUND TRUE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    # For macOS cross-compilation using Zig
-    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
-        # ARM64 macOS
-        set(HARFBUZZ_INCLUDE_DIRS /usr/local/darwin-aarch64/include/harfbuzz)
-        set(HARFBUZZ_LIBRARIES
-            /usr/local/darwin-aarch64/lib/libharfbuzz-subset.a
-            /usr/local/darwin-aarch64/lib/libharfbuzz.a
-        )
-    else()
-        # x86_64 macOS
-        set(HARFBUZZ_INCLUDE_DIRS /usr/local/darwin-x86_64/include/harfbuzz)
-        set(HARFBUZZ_LIBRARIES
-            /usr/local/darwin-x86_64/lib/libharfbuzz-subset.a
-            /usr/local/darwin-x86_64/lib/libharfbuzz.a
-        )
-    endif()
-    set(HARFBUZZ_FOUND TRUE)
-else()
-    # For Linux native build
+endif()
+
+# Fallback for native Linux builds outside the Docker image (developer
+# convenience — e.g. distro-packaged HarfBuzz). Not used by CI.
+if(NOT HARFBUZZ_FOUND AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig)
     if(PkgConfig_FOUND)
-        # Link only the subset library which includes all needed symbols
         pkg_check_modules(HARFBUZZ_SUBSET harfbuzz-subset)
         if(HARFBUZZ_SUBSET_FOUND)
             set(HARFBUZZ_INCLUDE_DIRS ${HARFBUZZ_SUBSET_INCLUDE_DIRS})
-            # Link both libraries - subset needs base library symbols
-            set(HARFBUZZ_LIBRARIES
-                "/usr/local/lib/libharfbuzz-subset.a"
-                "/usr/local/lib/libharfbuzz.a"
-            )
-            set(HARFBUZZ_FOUND TRUE)
-        endif()
-    endif()
-
-    if(NOT HARFBUZZ_FOUND)
-        # Fallback to manual search
-        find_path(HARFBUZZ_INCLUDE_DIRS
-            NAMES hb.h
-            PATHS /usr/local/include/harfbuzz /usr/include/harfbuzz
-        )
-        find_library(HARFBUZZ_LIBRARY
-            NAMES harfbuzz
-            PATHS /usr/local/lib /usr/lib
-        )
-        find_library(HARFBUZZ_SUBSET_LIBRARY
-            NAMES harfbuzz-subset
-            PATHS /usr/local/lib /usr/lib
-        )
-        if(HARFBUZZ_INCLUDE_DIRS AND HARFBUZZ_LIBRARY AND HARFBUZZ_SUBSET_LIBRARY)
-            # Link both libraries - subset needs base library symbols
-            set(HARFBUZZ_LIBRARIES
-                ${HARFBUZZ_SUBSET_LIBRARY}
-                ${HARFBUZZ_LIBRARY}
-            )
+            find_library(HARFBUZZ_SUBSET_LIB harfbuzz-subset PATHS ${HARFBUZZ_SUBSET_LIBRARY_DIRS})
+            find_library(HARFBUZZ_LIB        harfbuzz        PATHS ${HARFBUZZ_SUBSET_LIBRARY_DIRS})
+            set(HARFBUZZ_LIBRARIES ${HARFBUZZ_SUBSET_LIB} ${HARFBUZZ_LIB})
             set(HARFBUZZ_FOUND TRUE)
         endif()
     endif()
 endif()
 
 if(NOT HARFBUZZ_FOUND)
-    message(FATAL_ERROR "HarfBuzz not found. Please install HarfBuzz development packages.")
+    message(FATAL_ERROR "HarfBuzz not found at ${_HB_PREFIX}. Inside the cross-compile Docker image this is built automatically; for direct host builds, install distro HarfBuzz dev packages.")
 endif()
 
 message(STATUS "HarfBuzz include dirs: ${HARFBUZZ_INCLUDE_DIRS}")
@@ -188,14 +154,12 @@ target_include_directories(fontsubsetting PRIVATE
 if(WIN32)
     if(MINGW)
         # For MinGW, link everything statically except Windows system DLLs.
-        # --allow-multiple-definition is required: HarfBuzz's static build
-        # produces overlapping object files between libharfbuzz.a and
-        # libharfbuzz-subset.a (hb-number, hb-static, harfbuzz.cc all live in
-        # both archives) and ld pulls duplicates from both to satisfy our refs.
+        # --start-group lets ld revisit archives to satisfy forward references
+        # between libharfbuzz-subset.a and libharfbuzz.a without pulling
+        # duplicate object files.
         target_link_libraries(fontsubsetting
-            -Wl,--allow-multiple-definition
             -Wl,--exclude-libs,ALL
-            ${HARFBUZZ_LIBRARIES}
+            -Wl,--start-group ${HARFBUZZ_LIBRARIES} -Wl,--end-group
             -Wl,-Bstatic
             -lwinpthread
             -static-libgcc
@@ -204,7 +168,6 @@ if(WIN32)
             -lkernel32
             -luser32
         )
-        # Set link flags to avoid undefined symbols
         set_target_properties(fontsubsetting PROPERTIES
             LINK_FLAGS "-Wl,--no-undefined -Wl,--enable-runtime-pseudo-reloc"
         )
@@ -217,17 +180,14 @@ if(WIN32)
         )
     endif()
 elseif(NOT APPLE)
-    # Linux - link HarfBuzz statically.
+    # Linux - link HarfBuzz statically. --start-group resolves forward refs
+    # between libharfbuzz-subset.a and libharfbuzz.a. Version script hides
+    # HarfBuzz symbols so only JNI functions are exported.
     target_link_libraries(fontsubsetting
-        ${HARFBUZZ_LIBRARIES}
+        -Wl,--start-group ${HARFBUZZ_LIBRARIES} -Wl,--end-group
     )
-    # --allow-multiple-definition is required: HarfBuzz's static build produces
-    # overlapping object files between libharfbuzz.a and libharfbuzz-subset.a
-    # (hb-number, hb-static, harfbuzz.cc all live in both archives) and ld pulls
-    # duplicates from both to satisfy our refs. Version script hides HarfBuzz
-    # symbols so only JNI functions are exported.
     set_target_properties(fontsubsetting PROPERTIES
-        LINK_FLAGS "-Wl,--no-undefined -Wl,--allow-multiple-definition -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fontsubsetting.map"
+        LINK_FLAGS "-Wl,--no-undefined -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fontsubsetting.map"
     )
 else()
     # macOS - hide HarfBuzz symbols and only export JNI functions

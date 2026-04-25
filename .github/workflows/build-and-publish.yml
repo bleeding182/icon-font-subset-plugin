@@ -96,10 +96,51 @@ jobs:
           name: plugin-natives
           path: |
             plugin/src/main/resources/native/linux-x86_64/libfontsubsetting.so
+            plugin/src/main/resources/native/linux-aarch64/libfontsubsetting.so
             plugin/src/main/resources/native/windows-x86_64/fontsubsetting.dll
             plugin/src/main/resources/native/darwin-x86_64/libfontsubsetting.dylib
             plugin/src/main/resources/native/darwin-aarch64/libfontsubsetting.dylib
           retention-days: 7
+
+  # ==========================================================================
+  # Verify the Linux .so loads on an old glibc (locks in the 2.17 baseline
+  # set by the Zig wrappers in Dockerfile.cross-compile). The test job runs
+  # on Ubuntu 24.04 (glibc 2.39), so it can't catch a baseline regression
+  # on its own.
+  # ==========================================================================
+  glibc-baseline:
+    name: Verify glibc 2.17 baseline (linux-x86_64)
+    needs: build-native
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download native libraries
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-natives
+          path: native
+
+      - name: Inspect symbol versions
+        run: |
+          set -euo pipefail
+          LIB=native/linux-x86_64/libfontsubsetting.so
+          HIGHEST=$(strings "$LIB" | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
+          echo "Highest glibc symbol requirement: $HIGHEST"
+          BASELINE="GLIBC_2.17"
+          if [ "$(printf '%s\n%s\n' "$HIGHEST" "$BASELINE" | sort -V | tail -1)" != "$BASELINE" ]; then
+            echo "::error::glibc baseline regression: $LIB requires $HIGHEST, expected ≤ $BASELINE"
+            exit 1
+          fi
+
+      - name: Load on Debian 11 (glibc 2.31)
+        run: |
+          set -euo pipefail
+          LIB=native/linux-x86_64/libfontsubsetting.so
+          OUTPUT=$(docker run --rm -v "$PWD/$LIB:/lib.so:ro" debian:11 ldd /lib.so 2>&1)
+          echo "$OUTPUT"
+          if echo "$OUTPUT" | grep -q "not found"; then
+            echo "::error::libfontsubsetting.so cannot resolve all symbols on Debian 11"
+            exit 1
+          fi
 
   # ==========================================================================
   # Test native libraries on all platforms
@@ -113,6 +154,9 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux-x86_64
+            lib: libfontsubsetting.so
+          - os: ubuntu-24.04-arm
+            platform: linux-aarch64
             lib: libfontsubsetting.so
           - os: macos-latest
             platform: darwin-aarch64
@@ -177,7 +221,7 @@ jobs:
   build-and-publish:
     name: Build and Publish
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, glibc-baseline]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.version != '')
     permissions:
       contents: write

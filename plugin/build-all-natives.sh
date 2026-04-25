@@ -31,74 +31,50 @@ echo "========================================="
 echo "Building native libraries for all platforms"
 echo "========================================="
 
-mkdir -p "${OUTPUT_DIR}/linux-x86_64"
-mkdir -p "${OUTPUT_DIR}/windows-x86_64"
-mkdir -p "${OUTPUT_DIR}/darwin-x86_64"
-mkdir -p "${OUTPUT_DIR}/darwin-aarch64"
-
 # Function to build for a specific platform
 build_platform() {
     local PLATFORM=$1
     local TOOLCHAIN=$2
     local OUTPUT_NAME=$3
     local TARGET_DIR=$4
-    
+
     echo ""
     echo "Building for ${PLATFORM}..."
     echo "-----------------------------------------"
-    
+
     local BUILD_DIR="${BUILD_ROOT}/${PLATFORM}"
-    mkdir -p "${BUILD_DIR}"
+    mkdir -p "${BUILD_DIR}" "${OUTPUT_DIR}/${TARGET_DIR}"
     cd "${BUILD_DIR}"
-    
-    # Configure with CMake
-    if [ -z "${TOOLCHAIN}" ]; then
-        # Native build (Linux)
-        cmake "${SRC_DIR}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -G Ninja
-    else
-        # Cross-compilation
-        cmake "${SRC_DIR}" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCMAKE_TOOLCHAIN_FILE="${SCRIPT_DIR}/cmake/toolchains/${TOOLCHAIN}" \
-            -G Ninja
-    fi
-    
-    # Build
+
+    cmake "${SRC_DIR}" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_TOOLCHAIN_FILE="${SCRIPT_DIR}/cmake/toolchains/${TOOLCHAIN}" \
+        -G Ninja
+
     ninja
-    
-    # Strip the binary if not already done by linker (belt and suspenders approach)
-    if [ -f "${OUTPUT_NAME}" ]; then
-        # Strip symbols for even smaller size (if not already stripped by linker)
-        if [ "${PLATFORM}" = "linux-x86_64" ]; then
-            strip --strip-unneeded "${OUTPUT_NAME}" 2>/dev/null || true
-        elif [ "${PLATFORM}" = "windows-x86_64" ]; then
-            x86_64-w64-mingw32-strip --strip-unneeded "${OUTPUT_NAME}" 2>/dev/null || true
-        fi
-        # Note: macOS binaries cross-compiled with Zig may not strip properly with Linux tools
-        
-        cp "${OUTPUT_NAME}" "${OUTPUT_DIR}/${TARGET_DIR}/"
-        echo "✓ Built ${OUTPUT_NAME} for ${PLATFORM}"
-        echo "  Size: $(du -h "${OUTPUT_NAME}" | cut -f1)"
-    else
+
+    if [ ! -f "${OUTPUT_NAME}" ]; then
         echo "✗ Failed to build for ${PLATFORM} - library not found"
         return 1
     fi
+
+    # Belt-and-suspenders strip for Windows. Linux gets -Wl,-s and macOS
+    # gets -Wl,-S -Wl,-x via CMakeLists.txt, so they're already stripped at
+    # link time.
+    if [ "${PLATFORM}" = "windows-x86_64" ]; then
+        x86_64-w64-mingw32-strip --strip-unneeded "${OUTPUT_NAME}" 2>/dev/null || true
+    fi
+
+    cp "${OUTPUT_NAME}" "${OUTPUT_DIR}/${TARGET_DIR}/"
+    echo "✓ Built ${OUTPUT_NAME} for ${PLATFORM}"
+    echo "  Size: $(du -h "${OUTPUT_NAME}" | cut -f1)"
 }
 
-# Build for Linux x86_64 (native build)
-build_platform "linux-x86_64" "" "libfontsubsetting.so" "linux-x86_64"
-
-# Build for Windows x86_64 (MinGW cross-compilation)
-build_platform "windows-x86_64" "windows-x86_64.cmake" "fontsubsetting.dll" "windows-x86_64"
-
-# Build for macOS x86_64 (Zig cross-compilation)
-build_platform "darwin-x86_64" "darwin-x86_64.cmake" "libfontsubsetting.dylib" "darwin-x86_64"
-
-# Build for macOS ARM64 (Zig cross-compilation)
+build_platform "linux-x86_64"   "linux-x86_64.cmake"   "libfontsubsetting.so"    "linux-x86_64"
+build_platform "linux-aarch64"  "linux-aarch64.cmake"  "libfontsubsetting.so"    "linux-aarch64"
+build_platform "windows-x86_64" "windows-x86_64.cmake" "fontsubsetting.dll"      "windows-x86_64"
+build_platform "darwin-x86_64"  "darwin-x86_64.cmake"  "libfontsubsetting.dylib" "darwin-x86_64"
 build_platform "darwin-aarch64" "darwin-aarch64.cmake" "libfontsubsetting.dylib" "darwin-aarch64"
 
 echo ""
