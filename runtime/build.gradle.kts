@@ -54,7 +54,7 @@ android {
 
 mavenPublishing {
     configure(AndroidSingleVariantLibrary(variant = "release", sourcesJar = true, publishJavadocJar = true))
-    publishToMavenCentral(automaticRelease = true)
+    publishToMavenCentral(automaticRelease = false)
     signAllPublications()
 
     coordinates(group.toString(), "font-subsetting-runtime", version.toString())

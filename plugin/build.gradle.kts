@@ -64,7 +64,7 @@ tasks.test {
 
 mavenPublishing {
     configure(GradlePublishPlugin())
-    publishToMavenCentral(automaticRelease = true)
+    publishToMavenCentral(automaticRelease = false)
     signAllPublications()
 
     coordinates(group.toString(), "font-subsetting-plugin", version.toString())
