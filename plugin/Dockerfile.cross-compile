@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.6
 # Multi-stage Docker image for cross-compiling native libraries
 # Optimized for size and build caching
 
@@ -6,9 +7,12 @@
 # ============================================================================
 FROM ubuntu:24.04 AS base-builder
 
-# Version variables for easy updates
+# Version variables for easy updates. HARFBUZZ_VERSION should be kept in sync
+# with the repo-root gradle.properties; the runtime build also reads it from
+# there. build-in-docker.sh and the GitHub Actions workflow pass --build-arg.
 ARG HARFBUZZ_VERSION=12.3.2
 ARG ZIG_VERSION=0.15.1
+ARG ZIG_SHA256=c61c5da6edeea14ca51ecd5e4520c6f4189ef5250383db33d01848293bfafe05
 
 # Prevent interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -38,24 +42,27 @@ ENV PATH=$JAVA_HOME/bin:$PATH
 # Verify Java installation
 RUN java -version && javac -version
 
-# Install Zig for macOS cross-compilation
+# Install Zig for macOS cross-compilation. Pinned by SHA256 — bump alongside
+# ZIG_VERSION (canonical hashes published at https://ziglang.org/download/index.json).
 RUN cd /tmp && \
     wget -q https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
+    echo "${ZIG_SHA256}  zig-x86_64-linux-${ZIG_VERSION}.tar.xz" | sha256sum -c - && \
     tar xf zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
     mv zig-x86_64-linux-${ZIG_VERSION} /opt/zig && \
     ln -s /opt/zig/zig /usr/local/bin/zig && \
     rm zig-x86_64-linux-${ZIG_VERSION}.tar.xz && \
     zig version
 
-# Create Zig wrapper scripts for macOS cross-compilation
-RUN mkdir -p /usr/local/bin && \
-    # Zig CC wrappers for macOS \
-    printf '#!/bin/sh\nexec zig cc -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-x86_64-macos && \
-    printf '#!/bin/sh\nexec zig c++ -target x86_64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-x86_64-macos && \
-    printf '#!/bin/sh\nexec zig cc -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-cc-aarch64-macos && \
-    printf '#!/bin/sh\nexec zig c++ -target aarch64-macos-none -Oz "$@"\n' > /usr/local/bin/zig-c++-aarch64-macos && \
-    printf '#!/bin/sh\nzig ar "$@"\n' > /usr/local/bin/zig-ar && \
-    printf '#!/bin/sh\nzig ranlib "$@"\n' > /usr/local/bin/zig-ranlib && \
+# Zig wrappers fixing the target triple for CMake. Optimization flags come
+# from CMake's Release config (see plugin/src/main/cpp/CMakeLists.txt) so
+# we don't bake -Oz here. ar/ranlib have to be wrapper scripts (not symlinks)
+# because Zig's argv0 dispatch only recognizes basenames "ar" / "ranlib".
+RUN printf '#!/bin/sh\nexec zig cc -target x86_64-macos-none "$@"\n'   > /usr/local/bin/zig-cc-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target x86_64-macos-none "$@"\n'  > /usr/local/bin/zig-c++-x86_64-macos && \
+    printf '#!/bin/sh\nexec zig cc -target aarch64-macos-none "$@"\n'  > /usr/local/bin/zig-cc-aarch64-macos && \
+    printf '#!/bin/sh\nexec zig c++ -target aarch64-macos-none "$@"\n' > /usr/local/bin/zig-c++-aarch64-macos && \
+    printf '#!/bin/sh\nexec zig ar "$@"\n'                             > /usr/local/bin/zig-ar && \
+    printf '#!/bin/sh\nexec zig ranlib "$@"\n'                         > /usr/local/bin/zig-ranlib && \
     chmod +x /usr/local/bin/zig-*
 
 # Copy toolchain files from repository (instead of generating them)
@@ -66,7 +73,8 @@ COPY cmake/toolchains /toolchains
 # ============================================================================
 FROM base-builder AS harfbuzz-builder
 
-ARG HARFBUZZ_VERSION=12.3.2
+# Re-declare without default so the value flows from base-builder.
+ARG HARFBUZZ_VERSION
 
 # Clone HarfBuzz once (reused for all platforms)
 RUN cd /tmp && \

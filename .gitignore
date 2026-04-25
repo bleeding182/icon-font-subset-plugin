@@ -17,13 +17,11 @@ local.properties
 # Native build artifacts
 **/CMakeFiles/
 *.o
-.docker-image-id
 
 # Native binaries (generated via build-in-docker.sh)
 **/src/main/resources/native/**/*.so
 **/src/main/resources/native/**/*.dll
 **/src/main/resources/native/**/*.dylib
-**/src/main/resources/native/**/*.bin
 
 # Kotlin/Java
 *.class

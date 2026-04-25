@@ -34,17 +34,6 @@ kotlin {
     }
 }
 
-val copyNativeLibraries by tasks.registering(Copy::class) {
-    from(layout.projectDirectory.dir("native-libs-staging")) {
-        include("**/*.so", "**/*.dll", "**/*.dylib")
-    }
-    into(layout.buildDirectory.dir("resources/main/native"))
-}
-
-tasks.named<ProcessResources>("processResources") {
-    from(copyNativeLibraries)
-}
-
 gradlePlugin {
     website.set("https://github.com/bleeding182/icon-font-subset-plugin")
     vcsUrl.set("https://github.com/bleeding182/icon-font-subset-plugin.git")

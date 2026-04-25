@@ -6,11 +6,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
 
 # --- Fetch HarfBuzz source at configure time ---
+# HARFBUZZ_VERSION / HARFBUZZ_SHA256 come from repo-root gradle.properties via
+# externalNativeBuild { cmake { arguments(...) } } in runtime/build.gradle.kts.
+# Defaults match gradle.properties so direct CMake invocations still work.
+set(HARFBUZZ_VERSION "12.3.2" CACHE STRING "HarfBuzz release version")
+set(HARFBUZZ_SHA256 "6f6db164359a2da5a84ef826615b448b33e6306067ad829d85d5b0bf936f1bb8"
+    CACHE STRING "SHA256 of the HarfBuzz release tarball")
+
 include(FetchContent)
 FetchContent_Declare(
     harfbuzz
-    URL https://github.com/harfbuzz/harfbuzz/releases/download/12.3.2/harfbuzz-12.3.2.tar.xz
-    URL_HASH SHA256=6f6db164359a2da5a84ef826615b448b33e6306067ad829d85d5b0bf936f1bb8
+    URL https://github.com/harfbuzz/harfbuzz/releases/download/${HARFBUZZ_VERSION}/harfbuzz-${HARFBUZZ_VERSION}.tar.xz
+    URL_HASH SHA256=${HARFBUZZ_SHA256}
     DOWNLOAD_EXTRACT_TIMESTAMP FALSE
 )
 
@@ -103,25 +110,8 @@ target_include_directories(glyphruntime PRIVATE
 
 target_link_libraries(glyphruntime harfbuzz)
 
-if(ANDROID)
-    find_library(log-lib log)
-    target_link_libraries(glyphruntime ${log-lib})
-else()
-    # Host builds (Compose preview, Paparazzi/Roborazzi, tests) need JNI headers.
-    # For cross-compile targets (MinGW, Zig/Darwin) the sysroot has no JDK, so
-    # find_package(JNI) fails — use the build-host JDK headers instead. They are
-    # portable enough for header-only use since we don't link against libjvm.
-    if(DEFINED ENV{JAVA_HOME})
-        set(JNI_INCLUDE_DIRS
-            $ENV{JAVA_HOME}/include
-            $ENV{JAVA_HOME}/include/linux
-        )
-        message(STATUS "Using JAVA_HOME for JNI: $ENV{JAVA_HOME}")
-    else()
-        find_package(JNI REQUIRED)
-    endif()
-    target_include_directories(glyphruntime PRIVATE ${JNI_INCLUDE_DIRS})
-endif()
+find_library(log-lib log)
+target_link_libraries(glyphruntime ${log-lib})
 
 # Hide all symbols except JNI exports
 set_target_properties(glyphruntime PROPERTIES

@@ -10,6 +10,9 @@ plugins {
 group = "com.davidmedenjak.fontsubsetting"
 version = providers.gradleProperty("version").getOrElse("1.0.0-SNAPSHOT")
 
+val harfbuzzVersion = providers.gradleProperty("harfbuzzVersion").get()
+val harfbuzzSha256 = providers.gradleProperty("harfbuzzSha256").get()
+
 android {
     namespace = "com.davidmedenjak.fontsubsetting.runtime"
     compileSdk = 36
@@ -23,6 +26,8 @@ android {
                 arguments(
                     "-DANDROID_STL=c++_static",
                     "-DCMAKE_BUILD_TYPE=MinSizeRel",
+                    "-DHARFBUZZ_VERSION=$harfbuzzVersion",
+                    "-DHARFBUZZ_SHA256=$harfbuzzSha256",
                 )
                 abiFilters("armeabi-v7a", "arm64-v8a", "x86_64")
             }

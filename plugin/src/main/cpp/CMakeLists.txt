@@ -66,77 +66,18 @@ if(WIN32)
     set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ".lib")
 endif()
 
-# Find JNI
-# Set JAVA_HOME from environment if available
-if(DEFINED ENV{JAVA_HOME})
-    set(JAVA_HOME $ENV{JAVA_HOME})
-    message(STATUS "Using JAVA_HOME: ${JAVA_HOME}")
+# JNI headers are header-only for our purposes (we don't link libjvm), and the
+# Linux JDK headers in $JAVA_HOME/include + include/linux are portable enough
+# to use when cross-compiling for Windows and macOS too. Docker pre-sets
+# JAVA_HOME; native Linux builds outside Docker need it set as well.
+if(NOT DEFINED ENV{JAVA_HOME})
+    message(FATAL_ERROR "JAVA_HOME must be set. Inside the build Docker image this is automatic; for direct native builds, point it at a JDK install.")
 endif()
-
-# Handle JNI for different platforms
-if(CMAKE_SYSTEM_NAME STREQUAL "Windows" OR WIN32 OR MINGW)
-    # Windows or MinGW cross-compilation
-    # For cross-compilation, we use the Linux JDK's headers which are compatible
-    if(JAVA_HOME)
-        set(JNI_INCLUDE_DIRS
-            ${JAVA_HOME}/include
-            ${JAVA_HOME}/include/linux  # Use linux headers for cross-compilation
-        )
-    else()
-        # Fallback for manylinux2014 (CentOS 7)
-        set(JNI_INCLUDE_DIRS
-            /usr/lib/jvm/java-1.8.0-openjdk/include
-            /usr/lib/jvm/java-1.8.0-openjdk/include/linux
-        )
-    endif()
-    set(JNI_LIBRARIES "")  # We don't need to link JVM libraries for JNI
-    set(JNI_FOUND TRUE)
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    # macOS cross-compilation from Linux - use Linux JNI headers
-    # The JNI headers are platform-independent for the most part
-    if(JAVA_HOME)
-        set(JNI_INCLUDE_DIRS
-            ${JAVA_HOME}/include
-            ${JAVA_HOME}/include/linux  # Use Linux headers for cross-compilation
-        )
-    else()
-        # Fallback for Ubuntu
-        set(JNI_INCLUDE_DIRS
-            /usr/lib/jvm/java-11-openjdk-amd64/include
-            /usr/lib/jvm/java-11-openjdk-amd64/include/linux
-        )
-    endif()
-    set(JNI_LIBRARIES "")
-    set(JNI_FOUND TRUE)
-else()
-    # Linux native build
-    if(JAVA_HOME)
-        set(JNI_INCLUDE_DIRS 
-            ${JAVA_HOME}/include
-            ${JAVA_HOME}/include/linux
-        )
-        set(JNI_LIBRARIES "")
-        set(JNI_FOUND TRUE)
-    else()
-        # Try to find JNI, but don't require AWT
-        find_path(JNI_INCLUDE_DIRS jni.h
-            PATHS
-            /usr/lib/jvm/java-17-openjdk-amd64/include
-            /usr/lib/jvm/java-11-openjdk-amd64/include
-            /usr/lib/jvm/default-java/include
-            ${JAVA_HOME}/include
-        )
-        
-        if(JNI_INCLUDE_DIRS)
-            list(APPEND JNI_INCLUDE_DIRS "${JNI_INCLUDE_DIRS}/linux")
-            set(JNI_FOUND TRUE)
-            set(JNI_LIBRARIES "")
-        else()
-            message(FATAL_ERROR "Could not find JNI headers. Please set JAVA_HOME environment variable.")
-        endif()
-    endif()
-endif()
-
+set(JNI_INCLUDE_DIRS
+    $ENV{JAVA_HOME}/include
+    $ENV{JAVA_HOME}/include/linux
+)
+set(JNI_LIBRARIES "")
 message(STATUS "JNI include dirs: ${JNI_INCLUDE_DIRS}")
 
 # Find HarfBuzz
@@ -246,8 +187,11 @@ target_include_directories(fontsubsetting PRIVATE
 # Link libraries
 if(WIN32)
     if(MINGW)
-        # For MinGW, link everything statically except Windows system DLLs
-        # Static libs must come before -static-libgcc/-static-libstdc++ flags
+        # For MinGW, link everything statically except Windows system DLLs.
+        # --allow-multiple-definition is required: HarfBuzz's static build
+        # produces overlapping object files between libharfbuzz.a and
+        # libharfbuzz-subset.a (hb-number, hb-static, harfbuzz.cc all live in
+        # both archives) and ld pulls duplicates from both to satisfy our refs.
         target_link_libraries(fontsubsetting
             -Wl,--allow-multiple-definition
             -Wl,--exclude-libs,ALL
@@ -273,14 +217,15 @@ if(WIN32)
         )
     endif()
 elseif(NOT APPLE)
-    # Linux - link HarfBuzz statically
-    # Force inclusion of all needed symbols by putting static libs at the end
+    # Linux - link HarfBuzz statically.
     target_link_libraries(fontsubsetting
         ${HARFBUZZ_LIBRARIES}
     )
-    # Ensure we don't have undefined symbols at link time
-    # Allow multiple definitions due to overlap between libharfbuzz-subset and libharfbuzz
-    # Use version script to hide HarfBuzz symbols and only export JNI functions
+    # --allow-multiple-definition is required: HarfBuzz's static build produces
+    # overlapping object files between libharfbuzz.a and libharfbuzz-subset.a
+    # (hb-number, hb-static, harfbuzz.cc all live in both archives) and ld pulls
+    # duplicates from both to satisfy our refs. Version script hides HarfBuzz
+    # symbols so only JNI functions are exported.
     set_target_properties(fontsubsetting PROPERTIES
         LINK_FLAGS "-Wl,--no-undefined -Wl,--allow-multiple-definition -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/fontsubsetting.map"
     )
