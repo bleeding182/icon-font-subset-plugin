@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.davidmedenjak.fontsubsetting.runtime.FontAxisAnimation
 import com.davidmedenjak.fontsubsetting.runtime.GlyphVariationPreset
@@ -166,6 +167,14 @@ private val demoIcons: List<Pair<String, String>> = listOf(
     MaterialSymbols.close to "close",
     MaterialSymbols.cleanHands to "clean_hands",
 )
+
+@Preview(showBackground = true, widthDp = 412, heightDp = 900)
+@Composable
+private fun MainScreenPreview() {
+    FontSubsettingTheme {
+        MainScreen()
+    }
+}
 
 @Composable
 private fun IconCard(
