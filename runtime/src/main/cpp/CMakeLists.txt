@@ -11,6 +11,7 @@ FetchContent_Declare(
     harfbuzz
     URL https://github.com/harfbuzz/harfbuzz/releases/download/12.3.2/harfbuzz-12.3.2.tar.xz
     URL_HASH SHA256=6f6db164359a2da5a84ef826615b448b33e6306067ad829d85d5b0bf936f1bb8
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
 )
 
 # --- Minimal HarfBuzz build (no subsetting, no shaping backends) ---

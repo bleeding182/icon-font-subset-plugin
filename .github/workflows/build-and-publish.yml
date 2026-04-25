@@ -236,6 +236,9 @@ jobs:
           find runtime/src/main/resources/native -type f -name "glyphruntime.bin" \
             -exec ls -lh {} \;
 
+      - name: Install CMake 3.31.6
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "cmake;3.31.6"
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
