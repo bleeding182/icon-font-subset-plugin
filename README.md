@@ -1,17 +1,48 @@
 # Font Subsetting for Android
 
-A Gradle plugin that automatically subsets icon fonts based on actual usage in your code, paired with a Compose runtime library for rendering. Material Symbols ships ~10MB of glyphs; most apps use a handful. This plugin analyzes your source, finds which icons you reference, and produces a subset font containing only those glyphs -- reducing the font from megabytes to kilobytes.
+Adding icons individually is a pain. We already have icon fonts, but using them directly bloats the app with font sizes being multiple MB. Instead, we could look at which icons we use and then subset the font (also known as tree shaking if you have some JS background).
+
+There are two parts to this library:
+
+* Gradle plugin to offer you easy-to-use icons and subset the font for your build
+* Runtime lib that tries to optimize the rendering via JNI calls because the Typeface API that Android offers is a little clunky
 
 ## How It Works
 
-1. **Generate constants** -- The plugin parses `.codepoints` files and generates type-safe Kotlin constants for each icon.
-2. **Analyze usage** -- Kotlin PSI analysis scans your source code to determine which icon constants are actually referenced.
-3. **Subset font** -- HarfBuzz creates a new font file containing only the used glyphs, with optional axis and hinting optimizations.
-4. **Render** -- The runtime library provides a Compose `Glyph` painter that renders icons via native HarfBuzz path extraction.
+**1. Generate constants**
 
-## Setup
+The plugin parses `.codepoints` files and generates type-safe Kotlin constants for each icon.
 
-### Plugin
+```kotlin
+internal object MaterialSymbols {
+    // ...
+    const val home = "\uE9B2"
+    const val homeAndGarden = "\uEF9F"
+    const val homeFilled = "\uE9B2"
+    // ...
+}
+```
+
+_The `internal` is intentional so that we can determine which icons get used in the next step. If you use multiple modules, introduce a thin wrapper and you're good to go._
+
+```kotlin
+object AppIcon {
+    val home = MaterialSymbols.home
+    // ...
+}
+```
+
+**2. Analyze usage**
+
+Kotlin PSI analysis scans your source code to determine which icon constants are actually referenced. This is the basis for the next step.
+
+**3. Subset font**
+
+HarfBuzz is used to create a new font file containing only the used glyphs, with optional axes and hinting optimizations.
+
+## Plugin
+
+Add the plugin to register fonts and trigger the code generation showcased above.
 
 ```kotlin
 // settings.gradle.kts
@@ -23,15 +54,16 @@ pluginManagement {
     }
 }
 
-// app/build.gradle.kts
+// build.gradle.kts
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("com.davidmedenjak.fontsubsetting") version "1.0.0"
+    // ...
+    id("com.davidmedenjak.fontsubsetting") version "x.y.z"
 }
 ```
 
-### Configuration
+Register the icon font that you want to use. Don't add the font as a resource to your app, but put it in a separate directory. You can adjust the axis that you need, e.g. if you only use regular to bold you can adjust the weight to 400-700 which reduces the size further.
+
+Having a range for an axis is needed for animations (e.g. animating between regular and bold requires 400, 700 to be available)
 
 ```kotlin
 fontSubsetting {
@@ -55,18 +87,45 @@ fontSubsetting {
 }
 ```
 
-### Runtime
+### Using the output
 
-Add the runtime library dependency:
+The plugin emits the subsetted font at `R.font.<resourceName>` and a Kotlin object at `<className>`.
+
+You _can_ render them with stock Compose:
 
 ```kotlin
-// app/build.gradle.kts
-dependencies {
-    implementation("com.davidmedenjak.fontsubsetting:font-subsetting-runtime:1.0.0")
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import com.example.icons.MaterialSymbols
+
+@Composable
+fun MyScreen() {
+    val symbols = remember { FontFamily(Font(R.font.symbols)) }
+
+    Text(
+        text = MaterialSymbols.home,
+        fontFamily = symbols,
+        fontSize = 24.sp,
+    )
 }
 ```
 
-Use the generated constants with `rememberGlyphPainter`:
+But ideally you'd use a Composable sized in `dp` that focuses on drawing — `Text` is sized in `sp` and routes through the full text layout pipeline, which is overkill for a single glyph.
+
+## Runtime (optional)
+
+To alleviate the problems of using `Text`, this library offers a runtime. Since animations need to adjust the axis and the Android API only offers to do so in a roundabout way, the runtime bundles HarfBuzz to extract the paths for various axis and animate between them — packaged as a small JNI artifact.
+
+### Dependency
+
+```kotlin
+// build.gradle.kts
+dependencies {
+    implementation("com.davidmedenjak.fontsubsetting:font-subsetting-runtime:x.y.z")
+}
+```
+
+### Basic usage
 
 ```kotlin
 import com.example.icons.MaterialSymbols
@@ -86,26 +145,47 @@ fun MyScreen() {
 }
 ```
 
-## Variable Font Axes
+### Variable axes
 
-The plugin supports subsetting variable font axes -- you can constrain ranges, set defaults, or remove axes entirely to further reduce file size. At runtime, variation settings can be applied per icon, including animated transitions:
+Pass a static `FontVariation` for fixed axis values:
 
 ```kotlin
-val fill by animateFloatAsState(if (selected) 1f else 0f)
-
 Icon(
     painter = rememberGlyphPainter(
         text = MaterialSymbols.favorite,
         font = font,
-        variation = animateFontVariationAsState(
-            FontVariation.of("FILL" to fill, "wght" to 400f),
-        ),
+        variation = FontVariation.of("FILL" to 1f, "wght" to 700f),
     ),
     contentDescription = "Favorite",
 )
 ```
 
-Font variation settings require API 26+. On API 24-25, axis values are ignored and defaults are used.
+For animated transitions, define a `GlyphVariationPreset` and read it via `animateFontVariationAsState`. Frames are pre-computed at the display refresh rate and HarfBuzz path extraction is batched off the main thread:
+
+```kotlin
+private val Selectable = GlyphVariationPreset(
+    axes = listOf(
+        FontAxisAnimation("FILL", 0f, 1f),
+        FontAxisAnimation("wght", 400f, 400f),
+    ),
+)
+
+@Composable
+fun FavoriteIcon(font: GlyphFont) {
+    val variation by animateFontVariationAsState(Selectable)
+
+    Icon(
+        painter = rememberGlyphPainter(
+            text = MaterialSymbols.favorite,
+            font = font,
+            variation = variation,
+        ),
+        contentDescription = "Favorite",
+    )
+}
+```
+
+Variation works on all supported API levels via HarfBuzz. In Compose previews and JVM unit tests where the native library isn't loaded, the painter falls back to `Paint.fontVariationSettings`, which is silently ignored on API 24-25.
 
 ## Build
 
